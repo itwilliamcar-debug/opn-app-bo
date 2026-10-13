@@ -85,12 +85,9 @@ class AuthController extends Controller
 
         if ($user->is_2fa_enabled) {
             $otpCode = (string) random_int(100000, 999999);
-            // En local : OTP stocké en clair préfixé (évite bcrypt x2 qui saturait le login)
-            $otpStored = app()->environment('local')
-                ? 'plain:'.$otpCode
-                : Hash::make($otpCode);
+            // 6 chiffres : la colonne two_factor_code est limitée à 10 caractères.
             $user->forceFill([
-                'two_factor_code' => $otpStored,
+                'two_factor_code' => $otpCode,
                 'two_factor_expires_at' => now()->addMinutes(10),
             ])->save();
 
@@ -100,7 +97,7 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'message' => 'Code de securite 2FA transmis par SMS / Courriel.',
             ];
-            if (app()->environment('local')) {
+            if (app()->environment('local') || config('mail.default') === 'log') {
                 $payload['dev_otp_hint'] = $otpCode;
             }
 
@@ -155,6 +152,8 @@ class AuthController extends Controller
             $stored = (string) $user->two_factor_code;
             if (str_starts_with($stored, 'plain:')) {
                 $otpValid = hash_equals(substr($stored, 6), $validated['code']);
+            } elseif (preg_match('/^\d{6}$/', $stored)) {
+                $otpValid = hash_equals($stored, $validated['code']);
             } else {
                 $otpValid = Hash::check($validated['code'], $stored);
             }
