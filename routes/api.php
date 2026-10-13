@@ -21,6 +21,8 @@ use App\Http\Controllers\Api\ApproSuggestionDgController;
 use App\Http\Controllers\Api\DirectionController;
 use App\Http\Controllers\Api\DirectionModuleController;
 use App\Http\Controllers\Api\NiveauAccesController;
+use App\Http\Controllers\Api\FluxApprovisionnementController;
+use App\Http\Controllers\Api\PatrimoineController;
 
 /*
 |--------------------------------------------------------------------------
@@ -143,6 +145,17 @@ Route::prefix('v1')->group(function () {
         Route::put('/emergencies/{id}/resolve', [UrgenceController::class, 'resolve']);
 
         Route::get('/helpdesk/it-destination', [HelpdeskController::class, 'getItDestinationForUser']);
+
+        Route::get('/flux/commandes', [FluxApprovisionnementController::class, 'index']);
+        Route::post('/flux/commandes', [FluxApprovisionnementController::class, 'store']);
+        Route::post('/flux/commandes/{id}/transmettre', [FluxApprovisionnementController::class, 'transmettre']);
+        Route::post('/flux/commandes/{id}/disperser', [FluxApprovisionnementController::class, 'disperser']);
+        Route::post('/flux/commandes/{id}/rejeter', [FluxApprovisionnementController::class, 'rejeter']);
+
+        Route::get('/patrimoine', [PatrimoineController::class, 'index']);
+        Route::post('/patrimoine', [PatrimoineController::class, 'store']);
+        Route::put('/patrimoine/{id}', [PatrimoineController::class, 'update']);
+        Route::post('/patrimoine/{id}/remettre', [PatrimoineController::class, 'remettre']);
 
         Route::get('/audit/logs', [AuditController::class, 'index']);
 
