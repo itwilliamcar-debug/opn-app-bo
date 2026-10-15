@@ -49,7 +49,56 @@ class AuthController extends Controller
             'scope' => $roleConfig['scope'],
             'permissions' => $roleConfig['permissions'],
             'enforced_it_destination' => $enforcedIt,
+            'etat' => $user->etat ?: 'actif',
+            'poste_comptable' => $user->poste_comptable,
+            'profil' => $user->profil ? [
+                'id' => $user->profil->id,
+                'code' => $user->profil->code,
+                'libelle' => $user->profil->libelle,
+                'niveau_validation' => $user->profil->niveau_validation,
+            ] : null,
+            'habilitations' => $this->serialiserHabilitations($user),
         ];
+    }
+
+    protected function identiteSession(User $user): array
+    {
+        $payload = $this->formatUserPayload($user);
+
+        return [
+            'user' => $payload,
+            'habilitations' => $payload['habilitations'],
+        ];
+    }
+
+    protected function serialiserHabilitations(User $user): array
+    {
+        $user->loadMissing('profil.habilitations');
+        if (!$user->profil) {
+            return [];
+        }
+
+        return $user->profil->habilitations->map(function ($habilitation) {
+            $creer = (bool) $habilitation->pivot->creer;
+            $lire = (bool) $habilitation->pivot->lire;
+            $modifier = (bool) $habilitation->pivot->modifier;
+            $valider = (bool) $habilitation->pivot->valider;
+            return [
+                'code' => $habilitation->code,
+                'libelle' => $habilitation->libelle,
+                'module' => $habilitation->module,
+                'creer' => $creer,
+                'lire' => $lire,
+                'modifier' => $modifier,
+                'valider' => $valider,
+                'acces' => $creer || $lire || $modifier || $valider,
+            ];
+        })->values()->all();
+    }
+
+    protected function compteInactif(User $user): bool
+    {
+        return ($user->etat ?? 'actif') === 'inactif';
     }
 
     public function login(Request $request): JsonResponse
@@ -79,6 +128,13 @@ class AuthController extends Controller
                 'success' => false,
                 'message' => 'Identifiants invalides. Veuillez verifier votre adresse courriel OPN ou mot de passe.',
             ], 401);
+        }
+
+        if ($this->compteInactif($user)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ce compte est inactif.',
+            ], 403);
         }
 
         RateLimiter::clear($rateKey);
@@ -122,7 +178,7 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'token' => $token,
-            'user' => $this->formatUserPayload($user),
+            ...$this->identiteSession($user),
             'message' => 'Connexion etablie avec succes.',
         ]);
     }
@@ -188,7 +244,7 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'token' => $token,
-            'user' => $this->formatUserPayload($user),
+            ...$this->identiteSession($user),
             'message' => 'Session 2FA certifiee conforme.',
         ]);
     }
@@ -218,13 +274,20 @@ class AuthController extends Controller
             ], 404);
         }
 
+        if ($this->compteInactif($user)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ce compte est inactif.',
+            ], 403);
+        }
+
         // Création token seule (pas de delete préalable) — évite le lock SQLite sous charge
         $token = $user->createToken('opn_demo_quick')->plainTextToken;
 
         return response()->json([
             'success' => true,
             'token' => $token,
-            'user' => $this->formatUserPayload($user),
+            ...$this->identiteSession($user),
             'message' => 'Session démo ouverte (rapide).',
             'demo_quick' => true,
         ]);
@@ -239,7 +302,29 @@ class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'user' => $this->formatUserPayload($user),
+            ...$this->identiteSession($user),
+        ]);
+    }
+
+    public function refresh(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Non authentifie'], 401);
+        }
+
+        $actuel = $user->currentAccessToken();
+        $nouveau = $user->createToken('opn_auth_token');
+        $nouvelId = $nouveau->accessToken->id ?? null;
+        if ($actuel && $actuel->id !== $nouvelId) {
+            $actuel->delete();
+        }
+
+        return response()->json([
+            'success' => true,
+            'token' => $nouveau->plainTextToken,
+            ...$this->identiteSession($user),
+            'message' => 'Session prolongee.',
         ]);
     }
 

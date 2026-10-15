@@ -16,6 +16,10 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'code_role',
+        'profil_id',
+        'etat',
+        'poste_comptable',
         'entite',
         'province_id',
         'structure_id',
@@ -74,6 +78,11 @@ class User extends Authenticatable
     public function direction()
     {
         return $this->belongsTo(Direction::class);
+    }
+
+    public function profil()
+    {
+        return $this->belongsTo(Profil::class, 'profil_id');
     }
 
     public function niveauAcces()

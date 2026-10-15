@@ -50,7 +50,9 @@ return [
     |
     */
 
-    'expiration' => env('SANCTUM_TOKEN_EXPIRATION', 60 * 8), // 8 heures par défaut
+    // 90 minutes après la dernière émission. Le client renouvelle le jeton
+    // tant que l'utilisateur agit, et coupe la session après 1 h d'inactivité.
+    'expiration' => env('SANCTUM_TOKEN_EXPIRATION', 90),
 
     /*
     |--------------------------------------------------------------------------

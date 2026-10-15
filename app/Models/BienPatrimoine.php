@@ -12,16 +12,16 @@ class BienPatrimoine extends Model
     protected $fillable = [
         'code_bien',
         'designation',
-        'categorie',
+        'categorie_id',
         'description',
         'valeur_acquisition',
         'date_acquisition',
-        'duree_amortissement_mois',
+        'amortissement_id',
         'etat',
+        'siege_id',
         'antenne_id',
         'localisation',
-        'detenteur_user_id',
-        'detenteur_nom',
+        'detenteur_id',
         'date_remise',
         'date_retour',
         'observations',
@@ -36,6 +36,21 @@ class BienPatrimoine extends Model
 
     protected $appends = ['amortissement_cumule', 'valeur_nette'];
 
+    public function categorie(): BelongsTo
+    {
+        return $this->belongsTo(CategorieBien::class, 'categorie_id');
+    }
+
+    public function amortissement(): BelongsTo
+    {
+        return $this->belongsTo(Amortissement::class, 'amortissement_id');
+    }
+
+    public function siege(): BelongsTo
+    {
+        return $this->belongsTo(Siege::class, 'siege_id');
+    }
+
     public function antenne(): BelongsTo
     {
         return $this->belongsTo(AntenneProvinciale::class, 'antenne_id');
@@ -43,14 +58,14 @@ class BienPatrimoine extends Model
 
     public function detenteur(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'detenteur_user_id');
+        return $this->belongsTo(Agent::class, 'detenteur_id');
     }
 
     public function getAmortissementCumuleAttribute(): float
     {
         $achat = (float) $this->valeur_acquisition;
-        $mois = (int) $this->duree_amortissement_mois;
-        if ($achat <= 0 || $mois <= 0 || !$this->date_acquisition) {
+        $mois = (int) ($this->amortissement->duree_mois ?? 0);
+        if ($achat <= 0 || $mois <= 0 || ! $this->date_acquisition) {
             return 0;
         }
         $ecoules = $this->date_acquisition->diffInMonths(now());

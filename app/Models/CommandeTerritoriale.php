@@ -48,4 +48,9 @@ class CommandeTerritoriale extends Model
     {
         return $this->hasMany(LigneCommandeTerritoriale::class, 'commande_id');
     }
+
+    public function journal(): HasMany
+    {
+        return $this->hasMany(JournalFluxCommande::class, 'commande_id')->orderBy('id');
+    }
 }

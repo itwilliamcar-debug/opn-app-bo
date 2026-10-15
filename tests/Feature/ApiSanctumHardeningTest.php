@@ -44,6 +44,36 @@ class ApiSanctumHardeningTest extends TestCase
             ->assertJsonPath('success', true);
     }
 
+    public function test_refresh_replaces_the_current_token(): void
+    {
+        $user = User::factory()->create([
+            'code_role' => 'DG',
+            'role' => 'Directeur Général',
+            'is_2fa_enabled' => false,
+        ]);
+        $token = $user->createToken('opn_auth_token')->plainTextToken;
+
+        $res = $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/v1/auth/refresh');
+
+        $res->assertOk()->assertJsonPath('success', true);
+        $this->assertSame(1, $user->tokens()->count());
+        $newToken = $res->json('token');
+        $this->assertIsString($newToken);
+        $this->assertNotSame($token, $newToken);
+
+        $this->app['auth']->forgetGuards();
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->getJson('/api/v1/auth/me')
+            ->assertUnauthorized();
+
+        $this->app['auth']->forgetGuards();
+        $this->withHeader('Authorization', "Bearer {$newToken}")
+            ->getJson('/api/v1/auth/me')
+            ->assertOk()
+            ->assertJsonPath('user.email', $user->email);
+    }
+
     public function test_login_does_not_leak_otp_outside_local(): void
     {
         $this->seed();

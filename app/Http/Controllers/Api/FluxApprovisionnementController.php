@@ -11,16 +11,16 @@ use Illuminate\Support\Facades\DB;
 
 class FluxApprovisionnementController extends Controller
 {
-    private const ROLES_COMMANDE = ['DEMANDEUR_PHARMACIEN', 'DEMANDEUR_STRUCTURE', 'SUPER_ADMIN', 'CHEF_ANTENNE_PROVINCIALE', 'PHARMACIEN_CHEF_ANTENNE'];
-    private const ROLES_ANTENNE = ['CHEF_ANTENNE_PROVINCIALE', 'PHARMACIEN_CHEF_ANTENNE', 'SUPER_ADMIN'];
-    private const ROLES_SIEGE = ['APPRO_NATIONAL', 'COLLABORATEUR_APPRO', 'DG', 'DIR', 'DAF', 'ACHATS', 'PHARMACIEN_CHEF_NATIONAL', 'SUPER_ADMIN'];
+    private const ROLES_COMMANDE = ['DEMANDEUR_PHARMACIEN', 'DEMANDEUR_STRUCTURE', 'SUPER_ADMIN', 'ADMIN_METIER', 'CHEF_ANTENNE_PROVINCIALE', 'PHARMACIEN_CHEF_ANTENNE'];
+    private const ROLES_ANTENNE = ['CHEF_ANTENNE_PROVINCIALE', 'PHARMACIEN_CHEF_ANTENNE', 'SUPER_ADMIN', 'ADMIN_METIER'];
+    private const ROLES_SIEGE = ['APPRO_NATIONAL', 'COLLABORATEUR_APPRO', 'DG', 'DIR', 'DAF', 'ACHATS', 'PHARMACIEN_CHEF_NATIONAL', 'SUPER_ADMIN', 'ADMIN_METIER'];
 
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
         $stage = $this->stage($user->code_role);
 
-        $query = CommandeTerritoriale::with(['antenne', 'lignes'])->orderByDesc('id');
+        $query = CommandeTerritoriale::with(['antenne', 'lignes', 'journal'])->orderByDesc('id');
 
         if ($stage === 'commande') {
             $query->where('demandeur_user_id', $user->id);
@@ -32,10 +32,19 @@ class FluxApprovisionnementController extends Controller
             $query->where('statut', $request->query('statut'));
         }
 
+        $commandes = $query->get();
+
         return response()->json([
             'success' => true,
             'stage' => $stage,
-            'commandes' => $query->get(),
+            'server_time' => now()->toIso8601String(),
+            'compteurs' => [
+                'total' => $commandes->count(),
+                'recues' => $commandes->where('statut', 'SOUMISE_ANTENNE')->count(),
+                'transmises' => $commandes->where('statut', 'TRANSMISE_SIEGE')->count(),
+                'dispersees' => $commandes->where('statut', 'DISPERSEE')->count(),
+            ],
+            'commandes' => $commandes,
         ]);
     }
 
@@ -96,7 +105,10 @@ class FluxApprovisionnementController extends Controller
                 $commande->lignes()->create($ligne);
             }
 
-            return $commande->load(['antenne', 'lignes']);
+            $commande->load('antenne');
+            $this->journaliser($commande, $user, 'CREATION', 'Commande de '.$user->name.' pour l\'antenne '.($commande->antenne->nom ?? $commande->antenne_id));
+
+            return $commande->load(['antenne', 'lignes', 'journal']);
         });
 
         return response()->json(['success' => true, 'commande' => $commande], 201);
@@ -110,7 +122,7 @@ class FluxApprovisionnementController extends Controller
         }
 
         $commande = CommandeTerritoriale::findOrFail($id);
-        if ($user->code_role !== 'SUPER_ADMIN' && (int) $commande->antenne_id !== (int) $user->province_id) {
+        if (!in_array($user->code_role, ['SUPER_ADMIN', 'ADMIN_METIER'], true) && (int) $commande->antenne_id !== (int) $user->province_id) {
             return response()->json(['success' => false, 'message' => 'Cette commande n\'appartient pas à votre antenne.'], 403);
         }
         if ($commande->statut !== 'SOUMISE_ANTENNE') {
@@ -122,8 +134,9 @@ class FluxApprovisionnementController extends Controller
             'transmise_at' => now(),
             'transmise_par_nom' => $user->name,
         ]);
+        $this->journaliser($commande, $user, 'TRANSMISSION', 'Transmise au siège');
 
-        return response()->json(['success' => true, 'commande' => $commande->load(['antenne', 'lignes'])]);
+        return response()->json(['success' => true, 'commande' => $commande->load(['antenne', 'lignes', 'journal'])]);
     }
 
     public function disperser(Request $request, int $id): JsonResponse
@@ -160,9 +173,10 @@ class FluxApprovisionnementController extends Controller
                 'dispersee_par_nom' => $user->name,
                 'note_dispersion' => $data['note_dispersion'] ?? null,
             ]);
+            $this->journaliser($commande->fresh(), $user, 'DISPERSION', $data['note_dispersion'] ?? 'Quantités dispersées par le siège');
         });
 
-        return response()->json(['success' => true, 'commande' => $commande->fresh(['antenne', 'lignes'])]);
+        return response()->json(['success' => true, 'commande' => $commande->fresh(['antenne', 'lignes', 'journal'])]);
     }
 
     public function rejeter(Request $request, int $id): JsonResponse
@@ -181,13 +195,27 @@ class FluxApprovisionnementController extends Controller
         }
 
         $commande->update(['statut' => $statut, 'motif' => $data['motif']]);
+        $this->journaliser($commande, $user, 'REJET', $data['motif']);
 
-        return response()->json(['success' => true, 'commande' => $commande->load(['antenne', 'lignes'])]);
+        return response()->json(['success' => true, 'commande' => $commande->load(['antenne', 'lignes', 'journal'])]);
+    }
+
+    private function journaliser(CommandeTerritoriale $commande, $user, string $action, ?string $detail = null): void
+    {
+        $commande->journal()->create([
+            'user_id' => $user->id,
+            'antenne_id' => $commande->antenne_id,
+            'auteur_nom' => $user->name,
+            'auteur_role' => $user->role,
+            'action' => $action,
+            'statut' => $commande->statut,
+            'detail' => $detail,
+        ]);
     }
 
     private function stage(?string $codeRole): string
     {
-        if ($codeRole === 'SUPER_ADMIN') {
+        if (in_array($codeRole, ['SUPER_ADMIN', 'ADMIN_METIER'], true)) {
             return 'supervision';
         }
         if (in_array($codeRole, ['DEMANDEUR_PHARMACIEN', 'DEMANDEUR_STRUCTURE'], true)) {

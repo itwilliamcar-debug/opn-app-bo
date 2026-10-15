@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AntenneProvinciale extends Model
@@ -13,6 +14,7 @@ class AntenneProvinciale extends Model
     protected $table = 'antennes_provinciales';
 
     protected $fillable = [
+        'siege_id',
         'code_antenne',
         'nom',
         'chef_lieu',
@@ -35,6 +37,21 @@ class AntenneProvinciale extends Model
         'longitude' => 'decimal:6',
         'is_active' => 'boolean',
     ];
+
+    public function siege(): BelongsTo
+    {
+        return $this->belongsTo(Siege::class, 'siege_id');
+    }
+
+    public function directions(): HasMany
+    {
+        return $this->hasMany(Direction::class, 'antenne_id');
+    }
+
+    public function agents(): HasMany
+    {
+        return $this->hasMany(Agent::class, 'antenne_id');
+    }
 
     public function lots(): HasMany
     {

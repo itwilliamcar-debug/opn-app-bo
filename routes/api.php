@@ -23,6 +23,9 @@ use App\Http\Controllers\Api\DirectionModuleController;
 use App\Http\Controllers\Api\NiveauAccesController;
 use App\Http\Controllers\Api\FluxApprovisionnementController;
 use App\Http\Controllers\Api\PatrimoineController;
+use App\Http\Controllers\Api\OrganisationController;
+use App\Http\Controllers\Api\ReferentielController;
+use App\Http\Controllers\Api\ParametrageController;
 
 /*
 |--------------------------------------------------------------------------
@@ -49,6 +52,7 @@ Route::prefix('v1')->group(function () {
     // --- PROTECTED (Sanctum) ---
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
+        Route::post('/auth/refresh', [AuthController::class, 'refresh'])->middleware('throttle:30,1');
         Route::post('/auth/logout', [AuthController::class, 'logout']);
 
         // Présence collègues (filtrée par province)
@@ -151,6 +155,28 @@ Route::prefix('v1')->group(function () {
         Route::post('/flux/commandes/{id}/transmettre', [FluxApprovisionnementController::class, 'transmettre']);
         Route::post('/flux/commandes/{id}/disperser', [FluxApprovisionnementController::class, 'disperser']);
         Route::post('/flux/commandes/{id}/rejeter', [FluxApprovisionnementController::class, 'rejeter']);
+
+        Route::get('/parametrage/utilisateurs', [ParametrageController::class, 'utilisateurs']);
+        Route::post('/parametrage/utilisateurs', [ParametrageController::class, 'storeUtilisateur']);
+        Route::put('/parametrage/utilisateurs/{id}', [ParametrageController::class, 'updateUtilisateur']);
+        Route::delete('/parametrage/utilisateurs/{id}', [ParametrageController::class, 'desactiverUtilisateur']);
+        Route::get('/parametrage/profils', [ParametrageController::class, 'profils']);
+        Route::post('/parametrage/profils', [ParametrageController::class, 'storeProfil']);
+        Route::put('/parametrage/profils/{id}', [ParametrageController::class, 'updateProfil']);
+        Route::delete('/parametrage/profils/{id}', [ParametrageController::class, 'destroyProfil']);
+        Route::get('/parametrage/habilitations', [ParametrageController::class, 'habilitations']);
+        Route::post('/parametrage/habilitations', [ParametrageController::class, 'storeHabilitation']);
+        Route::put('/parametrage/habilitations/{id}', [ParametrageController::class, 'updateHabilitation']);
+        Route::get('/parametrage/habilitations-profils', [ParametrageController::class, 'liaisons']);
+        Route::put('/parametrage/profils/{id}/habilitations', [ParametrageController::class, 'syncProfilHabilitations']);
+
+        Route::get('/referentiel', [ReferentielController::class, 'ressources']);
+        Route::get('/referentiel/{ressource}', [ReferentielController::class, 'index']);
+        Route::post('/referentiel/{ressource}', [ReferentielController::class, 'store']);
+        Route::put('/referentiel/{ressource}/{id}', [ReferentielController::class, 'update']);
+        Route::delete('/referentiel/{ressource}/{id}', [ReferentielController::class, 'destroy']);
+
+        Route::get('/organisation', [OrganisationController::class, 'index']);
 
         Route::get('/patrimoine', [PatrimoineController::class, 'index']);
         Route::post('/patrimoine', [PatrimoineController::class, 'store']);
