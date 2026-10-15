@@ -16,6 +16,9 @@ class AntenneProvinciale extends Model
     protected $fillable = [
         'siege_id',
         'code_antenne',
+        'province_id',
+        'ville_id',
+        'responsable_user_id',
         'nom',
         'chef_lieu',
         'ville_antenne',
@@ -41,6 +44,21 @@ class AntenneProvinciale extends Model
     public function siege(): BelongsTo
     {
         return $this->belongsTo(Siege::class, 'siege_id');
+    }
+
+    public function province(): BelongsTo
+    {
+        return $this->belongsTo(Province::class);
+    }
+
+    public function ville(): BelongsTo
+    {
+        return $this->belongsTo(Ville::class);
+    }
+
+    public function responsable(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'responsable_user_id');
     }
 
     public function directions(): HasMany

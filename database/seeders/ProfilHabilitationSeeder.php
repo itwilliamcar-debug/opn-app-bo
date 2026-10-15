@@ -75,13 +75,35 @@ class ProfilHabilitationSeeder extends Seeder
             Habilitation::updateOrCreate(['code' => $code], ['libelle' => $libelle, 'module' => $module]);
         }
 
+        /* Patrick ONDO (sa) et Admin Métier ne sont pas modifiés ici. */
         $profils = [
             ['sa', 'Super administrateur / Admin IT', 9, 'SUPER_ADMIN', 'superadmin@opn.ga'],
             ['admin_metier', 'Admin métier', 8, 'ADMIN_METIER', 'admin.metier@opn.ga'],
-            ['dg', 'Directeur général', 5, 'DG', 'jb.obame@opn.ga'],
-            ['daf', 'Directrice administrative et financière', 4, 'DAF', 'daf@opn.ga'],
-            ['appro_national', 'Directrice des approvisionnements nationaux', 3, 'APPRO_NATIONAL', 's.ntsame@opn.ga'],
-            ['demandeur', 'Demandeur', 0, 'DEMANDEUR_PHARMACIEN', 'pharmacien.pog@opn.ga'],
+        ];
+
+        /*
+         * Anciens profils de connexion. Par défaut, seuls le flux et le patrimoine
+         * sont ouverts. Les administrateurs ajoutent les autres droits ensuite.
+         */
+        $profilsHistoriques = [
+            ['admin_it', 'Administrateur IT & Cyber-Sécurité', 8, 'ADMIN_IT', 'admin.it@opn.ga'],
+            ['dg', 'Directeur Général', 5, 'DG', 'jb.obame@opn.ga'],
+            ['dir', 'Directeur des Opérations & Pilotage', 4, 'DIR', 'dir.operations@opn.ga'],
+            ['daf', 'Directrice Administrative & Financière', 4, 'DAF', 'daf@opn.ga'],
+            ['appro_national', 'Directrice des Approvisionnements Nationaux', 3, 'APPRO_NATIONAL', 's.ntsame@opn.ga'],
+            ['collaborateur_appro', 'Collaborateur Approvisionnements', 2, 'COLLABORATEUR_APPRO', 'g.ndzie@opn.ga'],
+            ['achats', 'Responsable Achats & Marchés Fournisseurs', 2, 'ACHATS', 'achats@opn.ga'],
+            ['pharmacien_national', 'Pharmacien Chef National', 2, 'PHARMACIEN_CHEF_NATIONAL', 'pharmacien.national@opn.ga'],
+            ['pharmacien_antenne', 'Pharmacien Chef d\'Antenne Haut-Ogooué', 2, 'PHARMACIEN_CHEF_ANTENNE', 'pharmacie.frv@opn.ga'],
+            ['chef_antenne', 'Chef d\'Antenne Provinciale Ogooué-Maritime', 2, 'CHEF_ANTENNE_PROVINCIALE', 'chef.antenne.pog@opn.ga'],
+            ['urgences', 'Coordonnatrice Nationale des Urgences Sanitaires', 2, 'COORDINATEUR_URGENCES', 'urgences@opn.ga'],
+            ['logistique', 'Gestionnaire Logistique & Flotte Convois', 2, 'GESTIONNAIRE_LOGISTIQUE', 'logistique@opn.ga'],
+            ['surete', 'Chef de Convoi Sécurisé & Sûreté', 1, 'CHEF_CONVOI_SECURITE', 'securite.convois@opn.ga'],
+            ['convoyeur', 'Convoyeur Opérationnel de Fret Pharmaceutique', 1, 'CONVOYEUR', 'convoyeur@opn.ga'],
+            ['demandeur', 'Demandeur - Pharmacien d\'Officine Port-Gentil', 0, 'DEMANDEUR_PHARMACIEN', 'pharmacien.pog@opn.ga'],
+            ['demandeur_structure', 'Demandeur - Direction CHR Port-Gentil', 0, 'DEMANDEUR_STRUCTURE', 'structure.pog@opn.ga'],
+            ['communication', 'Responsable Communication & Relations Extérieures', 1, 'COMMUNICATION', 'communication@opn.ga'],
+            ['auditeur', 'Auditeur Interne & Conformité Réglementaire', 1, 'AUDITEUR_INTERNE', 'audit.interne@opn.ga'],
         ];
 
         $ids = [];
@@ -102,6 +124,28 @@ class ProfilHabilitationSeeder extends Seeder
             ]);
         }
 
+        foreach ($profilsHistoriques as [$code, $libelle, $niveau, $role, $email]) {
+            $profil = Profil::updateOrCreate(
+                ['code' => $code],
+                ['libelle' => $libelle, 'niveau_validation' => $niveau, 'systeme' => true]
+            );
+            $ids[$code] = $profil->id;
+            User::where('email', $email)->update([
+                'profil_id' => $profil->id,
+                'etat' => 'actif',
+                'code_role' => $role,
+            ]);
+        }
+
+        /* Le second collaborateur Appro partage le même profil. */
+        if (isset($ids['collaborateur_appro'])) {
+            User::where('email', 'j.obiang@opn.ga')->update([
+                'profil_id' => $ids['collaborateur_appro'],
+                'etat' => 'actif',
+                'code_role' => 'COLLABORATEUR_APPRO',
+            ]);
+        }
+
         $all = Habilitation::pluck('id', 'code');
         $grants = [
             'sa' => ['*' => ['creer' => true, 'lire' => true, 'modifier' => true, 'valider' => true]],
@@ -117,38 +161,6 @@ class ProfilHabilitationSeeder extends Seeder
                 'services' => $this->plein(),
                 'utilisateurs' => $this->plein(),
                 'parametrage' => $this->plein(),
-            ],
-            'dg' => [
-                'ACCESS_FLUX' => $this->access(),
-                'ACCESS_PATRIMOINE' => $this->access(),
-                'ACCESS_SERVICES' => $this->access(),
-                'ACCESS_PARAMETRAGE' => $this->access(),
-                'flux' => ['lire' => true, 'valider' => true],
-                'patrimoine' => ['creer' => true, 'lire' => true, 'modifier' => true],
-                'utilisateurs' => ['lire' => true],
-                'parametrage' => ['lire' => true],
-            ],
-            'daf' => [
-                'ACCESS_FLUX' => $this->access(),
-                'ACCESS_PATRIMOINE' => $this->access(),
-                'ACCESS_REFERENTIEL' => $this->access(),
-                'ACCESS_SERVICES' => $this->access(),
-                'flux' => ['lire' => true, 'valider' => true],
-                'patrimoine' => ['lire' => true, 'modifier' => true],
-                'referentiel' => ['lire' => true],
-            ],
-            'appro_national' => [
-                'ACCESS_FLUX' => $this->access(),
-                'ACCESS_REFERENTIEL' => $this->access(),
-                'ACCESS_PATRIMOINE' => $this->access(),
-                'ACCESS_SERVICES' => $this->access(),
-                'flux' => ['creer' => true, 'lire' => true, 'modifier' => true, 'valider' => true],
-                'referentiel' => ['lire' => true],
-                'patrimoine' => ['lire' => true],
-            ],
-            'demandeur' => [
-                'ACCESS_FLUX' => $this->access(),
-                'flux' => ['creer' => true, 'lire' => true],
             ],
         ];
 
@@ -167,6 +179,18 @@ class ProfilHabilitationSeeder extends Seeder
             }
         }
 
+        /* Deux menus seulement : chaîne d'approvisionnement et gestion du patrimoine. */
+        $accesFlux = $all['ACCESS_FLUX'] ?? null;
+        $accesPatrimoine = $all['ACCESS_PATRIMOINE'] ?? null;
+        foreach ($profilsHistoriques as [$code]) {
+            if (!$accesFlux || !$accesPatrimoine || !isset($ids[$code])) {
+                continue;
+            }
+            HabilitationProfil::where('profil_id', $ids[$code])->delete();
+            $this->grant($ids[$code], $accesFlux, $this->access());
+            $this->grant($ids[$code], $accesPatrimoine, $this->access());
+        }
+
         $this->rattacherSansProfil($ids);
     }
 
@@ -174,13 +198,25 @@ class ProfilHabilitationSeeder extends Seeder
     {
         $parRole = [
             'SUPER_ADMIN' => 'sa',
-            'ADMIN_IT' => 'sa',
             'ADMIN_METIER' => 'admin_metier',
+            'ADMIN_IT' => 'admin_it',
             'DG' => 'dg',
+            'DIR' => 'dir',
             'DAF' => 'daf',
             'APPRO_NATIONAL' => 'appro_national',
+            'COLLABORATEUR_APPRO' => 'collaborateur_appro',
+            'ACHATS' => 'achats',
+            'PHARMACIEN_CHEF_NATIONAL' => 'pharmacien_national',
+            'PHARMACIEN_CHEF_ANTENNE' => 'pharmacien_antenne',
+            'CHEF_ANTENNE_PROVINCIALE' => 'chef_antenne',
+            'COORDINATEUR_URGENCES' => 'urgences',
+            'GESTIONNAIRE_LOGISTIQUE' => 'logistique',
+            'CHEF_CONVOI_SECURITE' => 'surete',
+            'CONVOYEUR' => 'convoyeur',
             'DEMANDEUR_PHARMACIEN' => 'demandeur',
-            'DEMANDEUR_STRUCTURE' => 'demandeur',
+            'DEMANDEUR_STRUCTURE' => 'demandeur_structure',
+            'COMMUNICATION' => 'communication',
+            'AUDITEUR_INTERNE' => 'auditeur',
         ];
         foreach ($parRole as $role => $profilCode) {
             if (!isset($ids[$profilCode])) {

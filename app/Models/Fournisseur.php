@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Fournisseur extends Model
 {
@@ -14,6 +15,8 @@ class Fournisseur extends Model
     protected $fillable = [
         'code_fournisseur',
         'nom',
+        'pays_id',
+        'type_fournisseur_id',
         'pays',
         'type_fournisseur',
         'certifications',
@@ -23,6 +26,16 @@ class Fournisseur extends Model
         'contact_telephone',
         'statut_agrement',
     ];
+
+    public function paysOrigine(): BelongsTo
+    {
+        return $this->belongsTo(Pays::class, 'pays_id');
+    }
+
+    public function type(): BelongsTo
+    {
+        return $this->belongsTo(TypeFournisseur::class, 'type_fournisseur_id');
+    }
 
     public function commandes()
     {
