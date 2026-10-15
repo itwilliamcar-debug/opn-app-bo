@@ -840,5 +840,6 @@ class DatabaseSeeder extends Seeder
 
         // 13. OPN Connect — conversations privées uniquement (pas de canal public)
         $this->call(ConnectSeeder::class);
+        $this->call(ProfilHabilitationSeeder::class);
     }
 }

@@ -166,6 +166,34 @@ class ProfilHabilitationSeeder extends Seeder
                 $this->grant($ids[$profilCode], $all[$code], $flags);
             }
         }
+
+        $this->rattacherSansProfil($ids);
+    }
+
+    private function rattacherSansProfil(array $ids): void
+    {
+        $parRole = [
+            'SUPER_ADMIN' => 'sa',
+            'ADMIN_IT' => 'sa',
+            'ADMIN_METIER' => 'admin_metier',
+            'DG' => 'dg',
+            'DAF' => 'daf',
+            'APPRO_NATIONAL' => 'appro_national',
+            'DEMANDEUR_PHARMACIEN' => 'demandeur',
+            'DEMANDEUR_STRUCTURE' => 'demandeur',
+        ];
+        foreach ($parRole as $role => $profilCode) {
+            if (!isset($ids[$profilCode])) {
+                continue;
+            }
+            User::query()
+                ->where('code_role', $role)
+                ->whereNull('profil_id')
+                ->update([
+                    'profil_id' => $ids[$profilCode],
+                    'etat' => 'actif',
+                ]);
+        }
     }
 
     private function access(): array
