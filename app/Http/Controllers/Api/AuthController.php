@@ -29,6 +29,11 @@ class AuthController extends Controller
         ];
 
         $enforcedIt = $this->authService->getEnforcedItDestination($user);
+        $user->loadMissing(['antenne.province', 'provinceRattachement', 'direction']);
+        $antenneCompte = $user->antenne;
+        if (!$antenneCompte && $user->province_id) {
+            $antenneCompte = \App\Models\AntenneProvinciale::with('province')->find($user->province_id);
+        }
 
         return [
             'id' => $user->id,
@@ -41,6 +46,12 @@ class AuthController extends Controller
             'entite' => $user->entite,
             'province_id' => $user->province_id,
             'provinceId' => $user->province_id,
+            'antenne_id' => $user->antenne_id ?: $user->province_id,
+            'antenne' => $antenneCompte?->nom,
+            'province_rattachement_id' => $user->province_rattachement_id ?: $antenneCompte?->province_id,
+            'province_nom' => $user->provinceRattachement?->nom ?: $antenneCompte?->province?->nom,
+            'direction_id' => $user->direction_id,
+            'direction' => $user->direction?->nom,
             'structure_id' => $user->structure_id,
             'matricule_opn' => $user->matricule_opn,
             'service' => $user->service,
@@ -126,7 +137,7 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Identifiants invalides. Veuillez verifier votre adresse courriel OPN ou mot de passe.',
+                'message' => 'Identifiants invalides. Veuillez verifier votre email OPN ou mot de passe.',
             ], 401);
         }
 
@@ -151,7 +162,7 @@ class AuthController extends Controller
                 'success' => true,
                 'requires_2fa' => true,
                 'email' => $user->email,
-                'message' => 'Code de securite 2FA transmis par SMS / Courriel.',
+                'message' => 'Code de securite 2FA transmis par SMS / email.',
             ];
             if (app()->environment('local') || config('mail.default') === 'log') {
                 $payload['dev_otp_hint'] = $otpCode;

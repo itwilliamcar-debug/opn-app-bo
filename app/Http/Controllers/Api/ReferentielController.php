@@ -85,7 +85,7 @@ class ReferentielController extends Controller
             $model = $def['model']::create($data);
             $this->assurerChefLieu($ressource, $model);
         } catch (QueryException $e) {
-            return response()->json(['success' => false, 'message' => 'Ce code ou ce courriel existe déjà.'], 422);
+            return response()->json(['success' => false, 'message' => 'Ce code ou cet email existe déjà.'], 422);
         }
 
         return response()->json(['success' => true, 'row' => $def['present']($model->fresh())], 201);
@@ -105,7 +105,7 @@ class ReferentielController extends Controller
             $model->update($data);
             $this->assurerChefLieu($ressource, $model->fresh());
         } catch (QueryException $e) {
-            return response()->json(['success' => false, 'message' => 'Ce code ou ce courriel existe déjà.'], 422);
+            return response()->json(['success' => false, 'message' => 'Ce code ou cet email existe déjà.'], 422);
         }
 
         return response()->json(['success' => true, 'row' => $def['present']($model->fresh())]);
@@ -540,7 +540,7 @@ class ReferentielController extends Controller
                 ],
                 'colonnes' => [
                     ['key' => 'name', 'label' => 'Nom'],
-                    ['key' => 'email', 'label' => 'Courriel'],
+                    ['key' => 'email', 'label' => 'Email'],
                     ['key' => 'role', 'label' => 'Fonction'],
                     ['key' => 'code_role', 'label' => 'Profil'],
                     ['key' => 'antenne', 'label' => 'Antenne'],
@@ -548,7 +548,7 @@ class ReferentielController extends Controller
                 ],
                 'champs' => $this->champs([
                     ['name', 'Nom', 'text', true],
-                    ['email', 'Courriel', 'text', true],
+                    ['email', 'Email', 'text', true],
                     ['password', 'Mot de passe', 'text', false],
                     ['role', 'Fonction', 'text', true],
                     ['code_role', 'Profil', 'text', true],
@@ -662,7 +662,7 @@ class ReferentielController extends Controller
                     ['ville_id', 'Ville', 'select', true, 'villes', 'province_id'],
                     ['responsable_user_id', 'Responsable', 'select', false, 'responsables'],
                     ['contact_urgence', 'Contact', 'text', true],
-                    ['email', 'Courriel', 'text', false],
+                    ['email', 'Email', 'text', false],
                     ['statut', 'Statut', 'text', false],
                 ]),
                 'rules' => [
@@ -778,7 +778,7 @@ class ReferentielController extends Controller
                     ['type_fournisseur_id', 'Type', 'select', true, 'types_fournisseurs'],
                     ['statut_agrement', 'Agrément', 'text', false],
                     ['contact_nom', 'Contact', 'text', false],
-                    ['contact_email', 'Courriel', 'text', false],
+                    ['contact_email', 'Email', 'text', false],
                     ['contact_telephone', 'Téléphone', 'text', false],
                     ['delai_moyen_livraison_jours', 'Délai (jours)', 'number', false],
                 ]),

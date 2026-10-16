@@ -179,16 +179,108 @@ class ProfilHabilitationSeeder extends Seeder
             }
         }
 
-        /* Deux menus seulement : chaîne d'approvisionnement et gestion du patrimoine. */
-        $accesFlux = $all['ACCESS_FLUX'] ?? null;
-        $accesPatrimoine = $all['ACCESS_PATRIMOINE'] ?? null;
-        foreach ($profilsHistoriques as [$code]) {
-            if (!$accesFlux || !$accesPatrimoine || !isset($ids[$code])) {
+        /*
+         * Chaque profil reçoit les écrans du super administrateur qui correspondent
+         * à son métier, plus la chaîne, le référentiel et le centre de services.
+         * Le patrimoine reste réservé à la direction.
+         */
+        $commun = ['ACCESS_FLUX', 'ACCESS_REFERENTIEL', 'ACCESS_SERVICES'];
+        $direction = array_merge($commun, ['ACCESS_PATRIMOINE']);
+        $menus = [
+            'admin_it' => array_merge($commun, ['ACCESS_ADMIN', 'ACCESS_CONNECT']),
+            'dg' => array_merge($direction, [
+                'ACCESS_TABLEAU_BORD', 'ACCESS_MARGE', 'ACCESS_PROSPECTION', 'ACCESS_RECOUVREMENT',
+                'ACCESS_INVENTAIRES', 'ACCESS_PLANIFICATION', 'ACCESS_DISTRIBUTION', 'ACCESS_ENTREPOTS',
+                'ACCESS_FACTURATION', 'ACCESS_DEMANDES', 'ACCESS_APPROVISIONNEMENTS', 'ACCESS_ACHATS',
+                'ACCESS_QUALITE', 'ACCESS_LOGISTIQUE', 'ACCESS_ANTENNES', 'ACCESS_PORTAIL',
+                'ACCESS_AGENTS', 'ACCESS_GMAO', 'ACCESS_URGENCES', 'ACCESS_CONNECT', 'ACCESS_ADMIN',
+            ]),
+            'dir' => array_merge($direction, [
+                'ACCESS_TABLEAU_BORD', 'ACCESS_MARGE', 'ACCESS_PROSPECTION', 'ACCESS_INVENTAIRES',
+                'ACCESS_PLANIFICATION', 'ACCESS_DISTRIBUTION', 'ACCESS_ENTREPOTS', 'ACCESS_FACTURATION',
+                'ACCESS_DEMANDES', 'ACCESS_APPROVISIONNEMENTS', 'ACCESS_ACHATS', 'ACCESS_QUALITE',
+                'ACCESS_LOGISTIQUE', 'ACCESS_ANTENNES', 'ACCESS_PORTAIL', 'ACCESS_AGENTS',
+                'ACCESS_GMAO', 'ACCESS_URGENCES', 'ACCESS_CONNECT',
+            ]),
+            'daf' => array_merge($direction, [
+                'ACCESS_FACTURATION', 'ACCESS_RECOUVREMENT', 'ACCESS_MARGE', 'ACCESS_INVENTAIRES',
+                'ACCESS_PLANIFICATION', 'ACCESS_AGENTS', 'ACCESS_ENTREPOTS', 'ACCESS_DISTRIBUTION',
+                'ACCESS_DEMANDES', 'ACCESS_TABLEAU_BORD', 'ACCESS_ACHATS', 'ACCESS_APPROVISIONNEMENTS',
+                'ACCESS_LOGISTIQUE', 'ACCESS_CONNECT',
+            ]),
+            'appro_national' => array_merge($direction, [
+                'ACCESS_PLANIFICATION', 'ACCESS_DISTRIBUTION', 'ACCESS_ENTREPOTS', 'ACCESS_DEMANDES',
+                'ACCESS_APPROVISIONNEMENTS', 'ACCESS_ACHATS', 'ACCESS_QUALITE', 'ACCESS_LOGISTIQUE',
+                'ACCESS_ANTENNES', 'ACCESS_PORTAIL', 'ACCESS_TABLEAU_BORD', 'ACCESS_STOCKS',
+                'ACCESS_URGENCES', 'ACCESS_CONNECT',
+            ]),
+            'collaborateur_appro' => array_merge($commun, [
+                'ACCESS_PLANIFICATION', 'ACCESS_DISTRIBUTION', 'ACCESS_ENTREPOTS', 'ACCESS_DEMANDES',
+                'ACCESS_APPROVISIONNEMENTS', 'ACCESS_LOGISTIQUE', 'ACCESS_TABLEAU_BORD',
+                'ACCESS_STOCKS', 'ACCESS_URGENCES', 'ACCESS_CONNECT',
+            ]),
+            'achats' => array_merge($commun, [
+                'ACCESS_ACHATS', 'ACCESS_DEMANDES', 'ACCESS_STOCKS', 'ACCESS_APPROVISIONNEMENTS', 'ACCESS_CONNECT',
+            ]),
+            'pharmacien_national' => array_merge($commun, [
+                'ACCESS_PLANIFICATION', 'ACCESS_PORTAIL', 'ACCESS_GMAO', 'ACCESS_ENTREPOTS',
+                'ACCESS_QUALITE', 'ACCESS_STOCKS', 'ACCESS_DISTRIBUTION', 'ACCESS_TABLEAU_BORD',
+                'ACCESS_DEMANDES', 'ACCESS_URGENCES', 'ACCESS_CONNECT',
+            ]),
+            'chef_antenne' => array_merge($commun, [
+                'ACCESS_ANTENNES', 'ACCESS_PROSPECTION', 'ACCESS_INVENTAIRES', 'ACCESS_MARGE',
+                'ACCESS_FACTURATION', 'ACCESS_RECOUVREMENT', 'ACCESS_DISTRIBUTION', 'ACCESS_DEMANDES',
+                'ACCESS_STOCKS', 'ACCESS_LOGISTIQUE', 'ACCESS_APPROVISIONNEMENTS', 'ACCESS_URGENCES', 'ACCESS_CONNECT',
+            ]),
+            'pharmacien_antenne' => array_merge($commun, [
+                'ACCESS_ANTENNES', 'ACCESS_INVENTAIRES', 'ACCESS_STOCKS', 'ACCESS_QUALITE',
+                'ACCESS_DISTRIBUTION', 'ACCESS_DEMANDES', 'ACCESS_LOGISTIQUE', 'ACCESS_APPROVISIONNEMENTS',
+                'ACCESS_URGENCES', 'ACCESS_CONNECT',
+            ]),
+            'urgences' => array_merge($commun, [
+                'ACCESS_URGENCES', 'ACCESS_PLANIFICATION', 'ACCESS_DISTRIBUTION', 'ACCESS_QUALITE',
+                'ACCESS_DEMANDES', 'ACCESS_LOGISTIQUE', 'ACCESS_STOCKS', 'ACCESS_CONNECT',
+            ]),
+            'logistique' => array_merge($commun, [
+                'ACCESS_DISTRIBUTION', 'ACCESS_GMAO', 'ACCESS_ENTREPOTS', 'ACCESS_LOGISTIQUE',
+                'ACCESS_ANTENNES', 'ACCESS_DEMANDES', 'ACCESS_APPROVISIONNEMENTS', 'ACCESS_URGENCES', 'ACCESS_CONNECT',
+            ]),
+            'surete' => array_merge($commun, [
+                'ACCESS_DISTRIBUTION', 'ACCESS_LOGISTIQUE', 'ACCESS_DEMANDES', 'ACCESS_APPROVISIONNEMENTS',
+                'ACCESS_URGENCES', 'ACCESS_CONNECT',
+            ]),
+            'convoyeur' => array_merge($commun, [
+                'ACCESS_DISTRIBUTION', 'ACCESS_LOGISTIQUE', 'ACCESS_DEMANDES', 'ACCESS_URGENCES', 'ACCESS_CONNECT',
+            ]),
+            'demandeur' => array_merge($commun, ['ACCESS_DEMANDES', 'ACCESS_FACTURATION', 'ACCESS_STOCKS', 'ACCESS_CONNECT']),
+            'demandeur_structure' => array_merge($commun, ['ACCESS_DEMANDES', 'ACCESS_FACTURATION', 'ACCESS_STOCKS', 'ACCESS_CONNECT']),
+            'communication' => array_merge($commun, ['ACCESS_DEMANDES', 'ACCESS_CONNECT']),
+            'auditeur' => array_merge($commun, [
+                'ACCESS_ADMIN', 'ACCESS_TABLEAU_BORD', 'ACCESS_GMAO', 'ACCESS_PORTAIL', 'ACCESS_PLANIFICATION',
+                'ACCESS_DISTRIBUTION', 'ACCESS_ENTREPOTS', 'ACCESS_FACTURATION', 'ACCESS_DEMANDES',
+                'ACCESS_ACHATS', 'ACCESS_QUALITE', 'ACCESS_LOGISTIQUE', 'ACCESS_ANTENNES',
+                'ACCESS_APPROVISIONNEMENTS', 'ACCESS_CONNECT',
+            ]),
+        ];
+        foreach ($menus as $profilCode => $codes) {
+            if (!isset($ids[$profilCode])) {
                 continue;
             }
-            HabilitationProfil::where('profil_id', $ids[$code])->delete();
-            $this->grant($ids[$code], $accesFlux, $this->access());
-            $this->grant($ids[$code], $accesPatrimoine, $this->access());
+            HabilitationProfil::where('profil_id', $ids[$profilCode])->delete();
+            foreach (array_unique($codes) as $code) {
+                if (!isset($all[$code])) {
+                    continue;
+                }
+                $this->grant($ids[$profilCode], $all[$code], $this->access());
+            }
+        }
+
+        /* Le demandeur consulte le flux et crée ses demandes. Il ne transmet ni ne disperse. */
+        $flux = $all['flux'] ?? null;
+        foreach (['demandeur', 'demandeur_structure'] as $codeDemandeur) {
+            if ($flux && isset($ids[$codeDemandeur])) {
+                $this->grant($ids[$codeDemandeur], $flux, ['creer' => true, 'lire' => true]);
+            }
         }
 
         $this->rattacherSansProfil($ids);

@@ -22,6 +22,8 @@ class User extends Authenticatable
         'poste_comptable',
         'entite',
         'province_id',
+        'antenne_id',
+        'province_rattachement_id',
         'structure_id',
         'direction_id',
         'niveau_acces_id',
@@ -53,6 +55,18 @@ class User extends Authenticatable
     public function province()
     {
         return $this->belongsTo(AntenneProvinciale::class, 'province_id');
+    }
+
+    /** Antenne choisie à la création du compte. */
+    public function antenne()
+    {
+        return $this->belongsTo(AntenneProvinciale::class, 'antenne_id');
+    }
+
+    /** Province géographique du compte, distincte de l'antenne. */
+    public function provinceRattachement()
+    {
+        return $this->belongsTo(Province::class, 'province_rattachement_id');
     }
 
     public function structure()

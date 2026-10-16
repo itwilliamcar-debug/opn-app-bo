@@ -17,14 +17,15 @@ class FluxApprovisionnementController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $user = $request->user();
-        $stage = $this->stage($user->code_role);
+        $user = $request->user()->loadMissing('profil:id,code');
+        $stage = $this->voitToutesLesDemandes($user) ? 'supervision' : $this->stage($user->code_role);
 
         $query = CommandeTerritoriale::with(['antenne', 'lignes', 'journal'])->orderByDesc('id');
 
-        if ($stage === 'commande') {
+        /* Seuls le demandeur et l'antenne sont limités. L'admin métier voit tout. */
+        if (!$this->voitToutesLesDemandes($user) && $stage === 'commande') {
             $query->where('demandeur_user_id', $user->id);
-        } elseif ($stage === 'antenne' && $user->province_id) {
+        } elseif (!$this->voitToutesLesDemandes($user) && $stage === 'antenne' && $user->province_id) {
             $query->where('antenne_id', $user->province_id);
         }
 
@@ -56,7 +57,7 @@ class FluxApprovisionnementController extends Controller
         }
 
         $data = $request->validate([
-            'antenne_id' => 'required|exists:antennes_provinciales,id',
+            'antenne_id' => 'nullable|exists:antennes_provinciales,id',
             'partenaire_nom' => 'required|string|max:200',
             'partenaire_type' => 'nullable|string|max:40',
             'motif' => 'nullable|string|max:1000',
@@ -65,6 +66,20 @@ class FluxApprovisionnementController extends Controller
             'lignes.*.designation' => 'required|string|max:200',
             'lignes.*.quantite_demandee' => 'required|integer|min:1',
         ]);
+
+        /* L'antenne de la commande est celle du compte, pas celle envoyée par le formulaire. */
+        $antenneCompte = $user->antenne_id ?: $user->province_id;
+        if (!in_array($user->code_role, ['SUPER_ADMIN', 'ADMIN_METIER'], true)) {
+            if (!$antenneCompte) {
+                return response()->json(['success' => false, 'message' => 'Aucune antenne n\'est rattachée à ce compte.'], 422);
+            }
+            $data['antenne_id'] = (int) $antenneCompte;
+        } elseif (empty($data['antenne_id'])) {
+            $data['antenne_id'] = $antenneCompte;
+        }
+        if (empty($data['antenne_id'])) {
+            return response()->json(['success' => false, 'message' => 'Choisissez une antenne destinataire.'], 422);
+        }
 
         if (in_array($user->code_role, ['CHEF_ANTENNE_PROVINCIALE', 'PHARMACIEN_CHEF_ANTENNE'], true)
             && (int) $user->province_id !== (int) $data['antenne_id']) {
@@ -194,7 +209,7 @@ class FluxApprovisionnementController extends Controller
             return response()->json(['success' => false, 'message' => 'Cette commande ne peut pas être rejetée à cette étape.'], 422);
         }
 
-        $commande->update(['statut' => $statut, 'motif' => $data['motif']]);
+        $commande->update(['statut' => $statut]);
         $this->journaliser($commande, $user, 'REJET', $data['motif']);
 
         return response()->json(['success' => true, 'commande' => $commande->load(['antenne', 'lignes', 'journal'])]);
@@ -211,6 +226,13 @@ class FluxApprovisionnementController extends Controller
             'statut' => $commande->statut,
             'detail' => $detail,
         ]);
+    }
+
+    /** L'admin métier et le super administrateur consultent toutes les demandes, quelle que soit l'antenne. */
+    private function voitToutesLesDemandes($user): bool
+    {
+        return in_array($user->code_role, ['SUPER_ADMIN', 'ADMIN_METIER'], true)
+            || in_array($user->profil?->code, ['sa', 'admin_metier', 'dsi'], true);
     }
 
     private function stage(?string $codeRole): string

@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AntenneProvinciale;
+use App\Models\Direction;
 use App\Models\Habilitation;
 use App\Models\HabilitationProfil;
 use App\Models\Profil;
+use App\Models\Province;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,7 +23,18 @@ class ParametrageController extends Controller
     {
         return response()->json([
             'success' => true,
-            'utilisateurs' => User::with('profil:id,code,libelle')->orderBy('name')->get()->map(fn (User $user) => $this->utilisateur($user)),
+            'utilisateurs' => User::with(['profil:id,code,libelle', 'antenne:id,nom,chef_lieu', 'provinceRattachement:id,nom', 'direction:id,nom'])->orderBy('name')->get()->map(fn (User $user) => $this->utilisateur($user)),
+        ]);
+    }
+
+    /** Provinces, antennes et directions proposées à la création d'un compte. */
+    public function territoire(): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'provinces' => Province::query()->orderBy('nom')->get(['id', 'nom', 'code']),
+            'antennes' => AntenneProvinciale::query()->orderBy('nom')->get(['id', 'code_antenne', 'nom', 'chef_lieu', 'ville_antenne', 'province_id']),
+            'directions' => Direction::query()->active()->ordered()->get(['id', 'nom', 'code', 'antenne_id']),
         ]);
     }
 
@@ -33,6 +47,9 @@ class ParametrageController extends Controller
             'poste_comptable' => 'nullable|string|max:120',
             'etat' => 'nullable|in:actif,inactif',
             'password' => 'nullable|string|min:6',
+            'province_rattachement_id' => 'required|exists:provinces,id',
+            'antenne_id' => 'required|exists:antennes_provinciales,id',
+            'direction_id' => 'nullable|exists:directions,id',
         ]);
         $profil = Profil::findOrFail($data['profil_id']);
         $user = User::create([
@@ -44,9 +61,10 @@ class ParametrageController extends Controller
             'etat' => $data['etat'] ?? 'actif',
             'role' => $profil->libelle,
             'code_role' => $this->codeRole($profil->code),
+            ...$this->rattachement($data),
         ]);
 
-        return response()->json(['success' => true, 'utilisateur' => $this->utilisateur($user->load('profil'))], 201);
+        return response()->json(['success' => true, 'utilisateur' => $this->utilisateur($user->load(['profil', 'antenne', 'provinceRattachement', 'direction']))], 201);
     }
 
     public function updateUtilisateur(Request $request, int $id): JsonResponse
@@ -59,6 +77,9 @@ class ParametrageController extends Controller
             'poste_comptable' => 'nullable|string|max:120',
             'etat' => 'sometimes|in:actif,inactif',
             'password' => 'nullable|string|min:6',
+            'province_rattachement_id' => 'sometimes|exists:provinces,id',
+            'antenne_id' => 'sometimes|exists:antennes_provinciales,id',
+            'direction_id' => 'nullable|exists:directions,id',
         ]);
         if (empty($data['password'])) {
             unset($data['password']);
@@ -68,9 +89,16 @@ class ParametrageController extends Controller
             $data['role'] = $profil->libelle;
             $data['code_role'] = $this->codeRole($profil->code);
         }
+        if (!empty($data['antenne_id']) || !empty($data['province_rattachement_id'])) {
+            $data = array_merge($data, $this->rattachement([
+                'province_rattachement_id' => $data['province_rattachement_id'] ?? $user->province_rattachement_id,
+                'antenne_id' => $data['antenne_id'] ?? $user->antenne_id,
+                'direction_id' => array_key_exists('direction_id', $data) ? $data['direction_id'] : $user->direction_id,
+            ]));
+        }
         $user->update($data);
 
-        return response()->json(['success' => true, 'utilisateur' => $this->utilisateur($user->fresh('profil'))]);
+        return response()->json(['success' => true, 'utilisateur' => $this->utilisateur($user->fresh(['profil', 'antenne', 'provinceRattachement', 'direction']))]);
     }
 
     public function desactiverUtilisateur(int $id): JsonResponse
@@ -78,7 +106,7 @@ class ParametrageController extends Controller
         $user = User::findOrFail($id);
         $user->update(['etat' => 'inactif']);
 
-        return response()->json(['success' => true, 'utilisateur' => $this->utilisateur($user->fresh('profil'))]);
+        return response()->json(['success' => true, 'utilisateur' => $this->utilisateur($user->fresh(['profil', 'antenne', 'provinceRattachement', 'direction']))]);
     }
 
     public function profils(): JsonResponse
@@ -241,6 +269,37 @@ class ParametrageController extends Controller
             'profil' => $user->profil?->libelle,
             'profil_code' => $user->profil?->code,
             'code_role' => $user->code_role,
+            'province_rattachement_id' => $user->province_rattachement_id,
+            'province' => $user->provinceRattachement?->nom,
+            'antenne_id' => $user->antenne_id,
+            'antenne' => $user->antenne?->nom,
+            'direction_id' => $user->direction_id,
+            'direction' => $user->direction?->nom,
+        ];
+    }
+
+    /**
+     * Vérifie que l'antenne appartient à la province.
+     * province_id conserve l'antenne pour le flux déjà en place.
+     */
+    private function rattachement(array $data): array
+    {
+        $antenne = AntenneProvinciale::find($data['antenne_id'] ?? 0);
+        if (!$antenne || (int) $antenne->province_id !== (int) ($data['province_rattachement_id'] ?? 0)) {
+            abort(response()->json(['success' => false, 'message' => 'Cette antenne n\'appartient pas à la province choisie.'], 422));
+        }
+        if (!empty($data['direction_id'])) {
+            $direction = Direction::find($data['direction_id']);
+            if ($direction && $direction->antenne_id && (int) $direction->antenne_id !== (int) $antenne->id) {
+                abort(response()->json(['success' => false, 'message' => 'Cette direction n\'est pas rattachée à l\'antenne choisie.'], 422));
+            }
+        }
+
+        return [
+            'antenne_id' => $antenne->id,
+            'province_id' => $antenne->id,
+            'province_rattachement_id' => (int) $data['province_rattachement_id'],
+            'direction_id' => $data['direction_id'] ?? null,
         ];
     }
 
