@@ -165,6 +165,9 @@ class ProfilHabilitationSeeder extends Seeder
         ];
 
         foreach ($grants as $profilCode => $rows) {
+            if (!isset($ids[$profilCode]) || $this->profilDejaConfigure($ids[$profilCode])) {
+                continue;
+            }
             if (isset($rows['*'])) {
                 foreach ($all as $code => $habilitationId) {
                     $this->grant($ids[$profilCode], $habilitationId, $rows['*']);
@@ -263,10 +266,9 @@ class ProfilHabilitationSeeder extends Seeder
             ]),
         ];
         foreach ($menus as $profilCode => $codes) {
-            if (!isset($ids[$profilCode])) {
+            if (!isset($ids[$profilCode]) || $this->profilDejaConfigure($ids[$profilCode])) {
                 continue;
             }
-            HabilitationProfil::where('profil_id', $ids[$profilCode])->delete();
             foreach (array_unique($codes) as $code) {
                 if (!isset($all[$code])) {
                     continue;
@@ -322,6 +324,12 @@ class ProfilHabilitationSeeder extends Seeder
                     'etat' => 'actif',
                 ]);
         }
+    }
+
+    /** Un profil déjà coché en ligne n'est pas réinitialisé au déploiement. */
+    private function profilDejaConfigure(int $profilId): bool
+    {
+        return HabilitationProfil::where('profil_id', $profilId)->exists();
     }
 
     private function access(): array
