@@ -45,6 +45,7 @@ class FluxApprovisionnementController extends Controller
                 'transmises' => $commandes->where('statut', 'TRANSMISE_SIEGE')->count(),
                 'dispersees' => $commandes->where('statut', 'DISPERSEE')->count(),
             ],
+            'peut_supprimer' => $this->peutSupprimer($user),
             'commandes' => $commandes,
         ]);
     }
@@ -215,6 +216,24 @@ class FluxApprovisionnementController extends Controller
         return response()->json(['success' => true, 'commande' => $commande->load(['antenne', 'lignes', 'journal'])]);
     }
 
+    /** Supprime une commande visible par le profil, si la case Supprimer est cochée sur le flux. */
+    public function supprimer(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user()->loadMissing('profil:id,code');
+        if (!$this->peutSupprimer($user)) {
+            return response()->json(['success' => false, 'message' => 'Ce profil n\'a pas le droit de supprimer une commande.'], 403);
+        }
+
+        $commande = CommandeTerritoriale::findOrFail($id);
+        if (!$this->commandeVisible($user, $commande)) {
+            return response()->json(['success' => false, 'message' => 'Cette commande n\'est pas accessible à ce profil.'], 403);
+        }
+
+        $commande->delete();
+
+        return response()->json(['success' => true]);
+    }
+
     private function journaliser(CommandeTerritoriale $commande, $user, string $action, ?string $detail = null): void
     {
         $commande->journal()->create([
@@ -226,6 +245,38 @@ class FluxApprovisionnementController extends Controller
             'statut' => $commande->statut,
             'detail' => $detail,
         ]);
+    }
+
+    /** La case Supprimer de l'habilitation flux autorise la suppression des commandes. */
+    private function peutSupprimer($user): bool
+    {
+        $user->loadMissing('profil.habilitations');
+        $habilitations = $user->profil?->habilitations;
+        if (!$habilitations) {
+            return false;
+        }
+
+        return $habilitations
+            ->whereIn('code', ['flux', 'demandes'])
+            ->contains(fn ($habilitation) => (bool) $habilitation->pivot->supprimer);
+    }
+
+    /** Même périmètre que la liste : ses commandes, celles de son antenne, ou toutes. */
+    private function commandeVisible($user, CommandeTerritoriale $commande): bool
+    {
+        if ($this->voitToutesLesDemandes($user)) {
+            return true;
+        }
+
+        $stage = $this->stage($user->code_role);
+        if ($stage === 'commande') {
+            return (int) $commande->demandeur_user_id === (int) $user->id;
+        }
+        if ($stage === 'antenne' && $user->province_id) {
+            return (int) $commande->antenne_id === (int) $user->province_id;
+        }
+
+        return true;
     }
 
     /** L'admin métier et le super administrateur consultent toutes les demandes, quelle que soit l'antenne. */

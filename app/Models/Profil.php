@@ -25,7 +25,7 @@ class Profil extends Model
     public function habilitations(): BelongsToMany
     {
         return $this->belongsToMany(Habilitation::class, 'habilitation_profil')
-            ->withPivot(['creer', 'lire', 'modifier', 'valider'])
+            ->withPivot(['creer', 'lire', 'modifier', 'valider', 'supprimer'])
             ->withTimestamps();
     }
 }

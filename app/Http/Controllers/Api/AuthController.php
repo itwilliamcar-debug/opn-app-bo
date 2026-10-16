@@ -94,6 +94,7 @@ class AuthController extends Controller
             $lire = (bool) $habilitation->pivot->lire;
             $modifier = (bool) $habilitation->pivot->modifier;
             $valider = (bool) $habilitation->pivot->valider;
+            $supprimer = (bool) $habilitation->pivot->supprimer;
             return [
                 'code' => $habilitation->code,
                 'libelle' => $habilitation->libelle,
@@ -102,7 +103,8 @@ class AuthController extends Controller
                 'lire' => $lire,
                 'modifier' => $modifier,
                 'valider' => $valider,
-                'acces' => $creer || $lire || $modifier || $valider,
+                'supprimer' => $supprimer,
+                'acces' => $creer || $lire || $modifier || $valider || $supprimer,
             ];
         })->values()->all();
     }

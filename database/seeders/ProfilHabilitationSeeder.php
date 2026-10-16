@@ -148,7 +148,7 @@ class ProfilHabilitationSeeder extends Seeder
 
         $all = Habilitation::pluck('id', 'code');
         $grants = [
-            'sa' => ['*' => ['creer' => true, 'lire' => true, 'modifier' => true, 'valider' => true]],
+            'sa' => ['*' => ['creer' => true, 'lire' => true, 'modifier' => true, 'valider' => true, 'supprimer' => true]],
             'admin_metier' => [
                 'ACCESS_FLUX' => $this->plein(),
                 'ACCESS_REFERENTIEL' => $this->plein(),
@@ -339,7 +339,7 @@ class ProfilHabilitationSeeder extends Seeder
 
     private function plein(): array
     {
-        return ['creer' => true, 'lire' => true, 'modifier' => true, 'valider' => true];
+        return ['creer' => true, 'lire' => true, 'modifier' => true, 'valider' => true, 'supprimer' => true];
     }
 
     private function assurerAdminMetier(int $profilId): void
@@ -376,6 +376,7 @@ class ProfilHabilitationSeeder extends Seeder
             'lire' => (bool) ($flags['lire'] ?? false),
             'modifier' => (bool) ($flags['modifier'] ?? false),
             'valider' => (bool) ($flags['valider'] ?? false),
+            'supprimer' => (bool) ($flags['supprimer'] ?? false),
         ];
         if (!in_array(true, $payload, true)) {
             return;

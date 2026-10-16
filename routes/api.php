@@ -155,6 +155,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/flux/commandes/{id}/transmettre', [FluxApprovisionnementController::class, 'transmettre']);
         Route::post('/flux/commandes/{id}/disperser', [FluxApprovisionnementController::class, 'disperser']);
         Route::post('/flux/commandes/{id}/rejeter', [FluxApprovisionnementController::class, 'rejeter']);
+        Route::delete('/flux/commandes/{id}', [FluxApprovisionnementController::class, 'supprimer']);
 
         Route::get('/parametrage/territoire', [ParametrageController::class, 'territoire']);
         Route::get('/parametrage/utilisateurs', [ParametrageController::class, 'utilisateurs']);

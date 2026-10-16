@@ -16,6 +16,7 @@ class HabilitationProfil extends Model
         'lire',
         'modifier',
         'valider',
+        'supprimer',
     ];
 
     protected $casts = [
@@ -23,6 +24,7 @@ class HabilitationProfil extends Model
         'lire' => 'boolean',
         'modifier' => 'boolean',
         'valider' => 'boolean',
+        'supprimer' => 'boolean',
     ];
 
     public function profil(): BelongsTo

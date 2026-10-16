@@ -129,6 +129,7 @@ class ParametrageController extends Controller
             'habilitations.*.lire' => 'boolean',
             'habilitations.*.modifier' => 'boolean',
             'habilitations.*.valider' => 'boolean',
+            'habilitations.*.supprimer' => 'boolean',
         ]);
         $code = $this->codeProfil($data['code'] ?? $data['libelle']);
         if (Profil::where('code', $code)->exists()) {
@@ -221,6 +222,7 @@ class ParametrageController extends Controller
             'assignations.*.lire' => 'boolean',
             'assignations.*.modifier' => 'boolean',
             'assignations.*.valider' => 'boolean',
+            'assignations.*.supprimer' => 'boolean',
         ]);
         $this->syncHabilitations($profil, array_map(fn ($row) => [
             'id' => $row['idHabilitation'],
@@ -228,6 +230,7 @@ class ParametrageController extends Controller
             'lire' => $row['lire'] ?? false,
             'modifier' => $row['modifier'] ?? false,
             'valider' => $row['valider'] ?? false,
+            'supprimer' => $row['supprimer'] ?? false,
         ], $data['assignations']), (bool) ($data['forceRetrait'] ?? false));
 
         return response()->json(['success' => true]);
@@ -243,6 +246,7 @@ class ParametrageController extends Controller
                 'lire' => $plein || (bool) ($row['lire'] ?? false),
                 'modifier' => $plein || (bool) ($row['modifier'] ?? false),
                 'valider' => $plein || (bool) ($row['valider'] ?? false),
+                'supprimer' => $plein || (bool) ($row['supprimer'] ?? false),
             ];
             $vus[] = (int) $row['id'];
             if (!in_array(true, $flags, true)) {
