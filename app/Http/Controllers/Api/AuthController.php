@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\AuditLog;
 use App\Services\OpnAuthorizationService;
+use Database\Seeders\ProvincesActeursSeeder;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
@@ -133,6 +134,16 @@ class AuthController extends Controller
         }
 
         $user = User::where('email', $validated['email'])->first();
+
+        if (!$user || !Hash::check($validated['password'], $user->password)) {
+            try {
+                if (ProvincesActeursSeeder::assurer($validated['email'], $validated['password'])) {
+                    $user = User::whereRaw('LOWER(email) = ?', [mb_strtolower($validated['email'])])->first();
+                }
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
 
         if (!$user || !Hash::check($validated['password'], $user->password)) {
             RateLimiter::hit($rateKey, 60);

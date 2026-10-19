@@ -14,10 +14,44 @@ class ProvincesActeursSeeder extends Seeder
 {
     public function run(): void
     {
-        $profilChef = Profil::where('code', 'chef_antenne')->value('id');
-        $profilDemandeur = Profil::where('code', 'demandeur')->value('id');
+        foreach (self::catalogue() as $row) {
+            self::ecrire($row);
+        }
+    }
 
-        $acteurs = [
+    /**
+     * Crée ou répare un compte démo provincial lorsque l'email et le mot de passe
+     * officiels sont présentés. La base Railway n'est pas re-seedée au déploiement.
+     */
+    public static function assurer(string $email, string $password): bool
+    {
+        $email = mb_strtolower(trim($email));
+
+        foreach (self::catalogue() as $row) {
+            $slot = null;
+            if (mb_strtolower($row['chef']['email']) === $email) {
+                $slot = 'chef';
+            } elseif (mb_strtolower($row['demandeur']['email']) === $email) {
+                $slot = 'demandeur';
+            }
+
+            if ($slot === null) {
+                continue;
+            }
+
+            if (! hash_equals($row[$slot]['password'], $password)) {
+                return false;
+            }
+
+            return self::ecrire($row);
+        }
+
+        return false;
+    }
+
+    private static function catalogue(): array
+    {
+        return [
             [
                 'code' => 'EST',
                 'slug' => 'est',
@@ -208,26 +242,31 @@ class ProvincesActeursSeeder extends Seeder
                 ],
             ],
         ];
+    }
 
-        foreach ($acteurs as $row) {
-            $antenne = AntenneProvinciale::where('code_antenne', $row['code'])->first();
-            if (!$antenne) {
-                continue;
-            }
+    private static function ecrire(array $row): bool
+    {
+        $antenne = AntenneProvinciale::where('code_antenne', $row['code'])->first();
+        if (! $antenne) {
+            return false;
+        }
 
-            User::updateOrCreate(
-                ['email' => $row['chef']['email']],
-                [
-                    'name' => $row['chef']['name'],
-                    'password' => $row['chef']['password'],
-                    'role' => "Chef d'Antenne Provinciale {$row['province']}",
-                    'code_role' => 'CHEF_ANTENNE_PROVINCIALE',
-                    'entite' => "Antenne Provinciale {$row['province']} - {$row['chef_lieu']}",
-                    'province_id' => $antenne->id,
-                    'antenne_id' => $antenne->id,
-                    'profil_id' => $profilChef,
-                    'matricule_opn' => $row['chef']['matricule'],
-                    'telephone' => $row['chef']['telephone'],
+        $profilChef = Profil::where('code', 'chef_antenne')->value('id');
+        $profilDemandeur = Profil::where('code', 'demandeur')->value('id');
+
+        User::updateOrCreate(
+            ['email' => $row['chef']['email']],
+            [
+                'name' => $row['chef']['name'],
+                'password' => $row['chef']['password'],
+                'role' => "Chef d'Antenne Provinciale {$row['province']}",
+                'code_role' => 'CHEF_ANTENNE_PROVINCIALE',
+                'entite' => "Antenne Provinciale {$row['province']} - {$row['chef_lieu']}",
+                'province_id' => $antenne->id,
+                'antenne_id' => $antenne->id,
+                'profil_id' => $profilChef,
+                'matricule_opn' => $row['chef']['matricule'],
+                'telephone' => $row['chef']['telephone'],
                     'etat' => 'actif',
                     'is_2fa_enabled' => false,
                 ]
@@ -250,6 +289,7 @@ class ProvincesActeursSeeder extends Seeder
                     'is_2fa_enabled' => false,
                 ]
             );
-        }
+
+        return true;
     }
 }
