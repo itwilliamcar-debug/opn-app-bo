@@ -102,6 +102,7 @@ class ProfilHabilitationSeeder extends Seeder
             ['convoyeur', 'Convoyeur Opérationnel de Fret Pharmaceutique', 1, 'CONVOYEUR', 'convoyeur@opn.ga'],
             ['demandeur', 'Demandeur - Pharmacien d\'Officine Port-Gentil', 0, 'DEMANDEUR_PHARMACIEN', 'pharmacien.pog@opn.ga'],
             ['demandeur_structure', 'Demandeur - Direction CHR Port-Gentil', 0, 'DEMANDEUR_STRUCTURE', 'structure.pog@opn.ga'],
+            ['vendeur', 'Vendeur / Commercial Terrain', 1, 'VENDEUR', 'commercial.oyem@opn.ga'],
             ['communication', 'Responsable Communication & Relations Extérieures', 1, 'COMMUNICATION', 'communication@opn.ga'],
             ['auditeur', 'Auditeur Interne & Conformité Réglementaire', 1, 'AUDITEUR_INTERNE', 'audit.interne@opn.ga'],
         ];
@@ -230,11 +231,13 @@ class ProfilHabilitationSeeder extends Seeder
                 'ACCESS_QUALITE', 'ACCESS_STOCKS', 'ACCESS_DISTRIBUTION', 'ACCESS_TABLEAU_BORD',
                 'ACCESS_DEMANDES', 'ACCESS_URGENCES', 'ACCESS_CONNECT',
             ]),
-            'chef_antenne' => array_merge($commun, [
+            // Chef d'antenne : pas de référentiel (flux + services + modules métier antenne).
+            'chef_antenne' => [
+                'ACCESS_FLUX', 'ACCESS_SERVICES',
                 'ACCESS_ANTENNES', 'ACCESS_PROSPECTION', 'ACCESS_INVENTAIRES', 'ACCESS_MARGE',
                 'ACCESS_FACTURATION', 'ACCESS_RECOUVREMENT', 'ACCESS_DISTRIBUTION', 'ACCESS_DEMANDES',
                 'ACCESS_STOCKS', 'ACCESS_LOGISTIQUE', 'ACCESS_APPROVISIONNEMENTS', 'ACCESS_URGENCES', 'ACCESS_CONNECT',
-            ]),
+            ],
             'pharmacien_antenne' => array_merge($commun, [
                 'ACCESS_ANTENNES', 'ACCESS_INVENTAIRES', 'ACCESS_STOCKS', 'ACCESS_QUALITE',
                 'ACCESS_DISTRIBUTION', 'ACCESS_DEMANDES', 'ACCESS_LOGISTIQUE', 'ACCESS_APPROVISIONNEMENTS',
@@ -257,6 +260,10 @@ class ProfilHabilitationSeeder extends Seeder
             ]),
             'demandeur' => array_merge($commun, ['ACCESS_DEMANDES', 'ACCESS_FACTURATION', 'ACCESS_STOCKS', 'ACCESS_CONNECT']),
             'demandeur_structure' => array_merge($commun, ['ACCESS_DEMANDES', 'ACCESS_FACTURATION', 'ACCESS_STOCKS', 'ACCESS_CONNECT']),
+            'vendeur' => array_merge($commun, [
+                'ACCESS_PROSPECTION', 'ACCESS_FACTURATION', 'ACCESS_MARGE', 'ACCESS_RECOUVREMENT',
+                'ACCESS_INVENTAIRES', 'ACCESS_STOCKS', 'ACCESS_DEMANDES', 'ACCESS_CONNECT',
+            ]),
             'communication' => array_merge($commun, ['ACCESS_DEMANDES', 'ACCESS_CONNECT']),
             'auditeur' => array_merge($commun, [
                 'ACCESS_ADMIN', 'ACCESS_TABLEAU_BORD', 'ACCESS_GMAO', 'ACCESS_PORTAIL', 'ACCESS_PLANIFICATION',
@@ -277,11 +284,47 @@ class ProfilHabilitationSeeder extends Seeder
             }
         }
 
-        /* Le demandeur consulte le flux et crée ses demandes. Il ne transmet ni ne disperse. */
+        /* Droits métier du vendeur (prospection, facturation, marge, stocks…). */
+        if (isset($ids['vendeur'])) {
+            foreach (['prospection', 'facturation', 'marge', 'recouvrement', 'inventaires', 'stocks', 'demandes', 'referentiel'] as $codeGestion) {
+                if (isset($all[$codeGestion])) {
+                    $this->grant($ids['vendeur'], $all[$codeGestion], [
+                        'creer' => true,
+                        'lire' => true,
+                        'modifier' => true,
+                        'valider' => in_array($codeGestion, ['prospection', 'facturation'], true),
+                    ]);
+                }
+            }
+        }
+
+        /* Droits métier sur la chaîne d'approvisionnement (gestion des commandes). */
         $flux = $all['flux'] ?? null;
-        foreach (['demandeur', 'demandeur_structure'] as $codeDemandeur) {
-            if ($flux && isset($ids[$codeDemandeur])) {
-                $this->grant($ids[$codeDemandeur], $flux, ['creer' => true, 'lire' => true]);
+        if ($flux) {
+            // Demandeur : crée et consulte uniquement.
+            foreach (['demandeur', 'demandeur_structure'] as $codeDemandeur) {
+                if (isset($ids[$codeDemandeur])) {
+                    $this->grant($ids[$codeDemandeur], $flux, ['creer' => true, 'lire' => true]);
+                }
+            }
+            // Antenne : prend en charge (modifier) et peut aussi commander.
+            foreach (['chef_antenne', 'pharmacien_antenne'] as $codeAntenne) {
+                if (isset($ids[$codeAntenne])) {
+                    $this->grant($ids[$codeAntenne], $flux, [
+                        'creer' => true,
+                        'lire' => true,
+                        'modifier' => true,
+                    ]);
+                }
+            }
+            // Siège : disperse (valider).
+            foreach (['appro_national', 'collaborateur_appro', 'dg', 'dir', 'daf', 'achats', 'pharmacien_national'] as $codeSiege) {
+                if (isset($ids[$codeSiege])) {
+                    $this->grant($ids[$codeSiege], $flux, [
+                        'lire' => true,
+                        'valider' => true,
+                    ]);
+                }
             }
         }
 
@@ -309,6 +352,7 @@ class ProfilHabilitationSeeder extends Seeder
             'CONVOYEUR' => 'convoyeur',
             'DEMANDEUR_PHARMACIEN' => 'demandeur',
             'DEMANDEUR_STRUCTURE' => 'demandeur_structure',
+            'VENDEUR' => 'vendeur',
             'COMMUNICATION' => 'communication',
             'AUDITEUR_INTERNE' => 'auditeur',
         ];

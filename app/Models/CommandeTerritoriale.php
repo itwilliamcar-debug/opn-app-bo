@@ -23,6 +23,11 @@ class CommandeTerritoriale extends Model
         'montant_total_xaf',
         'transmise_at',
         'transmise_par_nom',
+        'transferee_au_siege_at',
+        'transferee_au_siege_par_user_id',
+        'transferee_au_siege_par_nom',
+        'prise_en_charge_siege_at',
+        'prise_en_charge_siege_par_nom',
         'dispersee_at',
         'dispersee_par_nom',
         'note_dispersion',
@@ -31,8 +36,11 @@ class CommandeTerritoriale extends Model
     protected $casts = [
         'montant_total_xaf' => 'decimal:2',
         'transmise_at' => 'datetime',
+        'transferee_au_siege_at' => 'datetime',
+        'prise_en_charge_siege_at' => 'datetime',
         'dispersee_at' => 'datetime',
     ];
+
 
     public function antenne(): BelongsTo
     {
@@ -52,5 +60,15 @@ class CommandeTerritoriale extends Model
     public function journal(): HasMany
     {
         return $this->hasMany(JournalFluxCommande::class, 'commande_id')->orderBy('id');
+    }
+
+    public function transfertsSiege(): HasMany
+    {
+        return $this->hasMany(FluxTransfertSiege::class, 'commande_id')->orderBy('id');
+    }
+
+    public function prisesEnChargeSiege(): HasMany
+    {
+        return $this->hasMany(FluxPriseEnChargeSiege::class, 'commande_id')->orderBy('id');
     }
 }

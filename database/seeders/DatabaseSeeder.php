@@ -264,7 +264,7 @@ class DatabaseSeeder extends Seeder
         $chrPortGentil = StructureSanitaire::where('code_structure', 'CHR-POG-03')->first();
         $pharmPortGentil = StructureSanitaire::where('code_structure', 'PHARM-POG-04')->first();
 
-        // 3. Utilisateurs métier OPN (20 profils : +2 Collaborateurs Appro)
+        // 3. Utilisateurs métier OPN (21 profils dont Admin Métier + 2 Collaborateurs Appro)
         $usersData = [
             [
                 'name' => 'Ing. Patrick ONDO MVE',
@@ -277,6 +277,20 @@ class DatabaseSeeder extends Seeder
                 'matricule_opn' => 'OPN-ADM-001',
                 'telephone' => '+241 011 70 00 01',
                 'is_2fa_enabled' => false,
+                'etat' => 'actif',
+            ],
+            [
+                'name' => 'Admin Métier',
+                'email' => 'admin.metier@opn.ga',
+                'password' => Hash::make('OPN2026@Metier'),
+                'role' => 'Admin métier',
+                'code_role' => 'ADMIN_METIER',
+                'entite' => 'Paramétrage métier OPN - Libreville',
+                'province_id' => $hubOwendo->id,
+                'matricule_opn' => 'OPN-MET-001',
+                'telephone' => '+241 011 70 00 02',
+                'is_2fa_enabled' => false,
+                'etat' => 'actif',
             ],
             [
                 'name' => 'Ing. Kevin MAVOUNGOU BIYOGHE',
@@ -456,6 +470,18 @@ class DatabaseSeeder extends Seeder
                 'province_id' => $hubOwendo->id,
                 'matricule_opn' => 'OPN-CVY-001',
                 'telephone' => '+241 074 55 66 77',
+                'is_2fa_enabled' => false,
+            ],
+            [
+                'name' => 'M. Paul MEBIAME',
+                'email' => 'commercial.oyem@opn.ga',
+                'password' => Hash::make('OPN2026@Vendeur'),
+                'role' => 'Vendeur / Commercial Terrain',
+                'code_role' => 'VENDEUR',
+                'entite' => 'Direction Commerciale — Antenne Woleu-Ntem (Oyem)',
+                'province_id' => $antenneOye->id,
+                'matricule_opn' => 'OPN-VEN-001',
+                'telephone' => '+241 077 45 12 88',
                 'is_2fa_enabled' => false,
             ],
             [
@@ -841,5 +867,14 @@ class DatabaseSeeder extends Seeder
         // 13. OPN Connect — conversations privées uniquement (pas de canal public)
         $this->call(ConnectSeeder::class);
         $this->call(ProfilHabilitationSeeder::class);
+
+        // 14. Chefs d'antenne + demandeurs pour les 9 provinces
+        $this->call(ProvincesActeursSeeder::class);
+
+        // 15. Contenu du site public (actualités, marchés, textes institutionnels)
+        $this->call(SitePublicSeeder::class);
+
+        // 16. Prospects commerciaux (seed SICL / vendeur)
+        $this->call(CommercialProspectSeeder::class);
     }
 }

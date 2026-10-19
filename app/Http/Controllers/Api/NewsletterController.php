@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Models\Actualite;
 use App\Models\NewsletterSubscriber;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
 class NewsletterController extends Controller
@@ -35,22 +37,12 @@ class NewsletterController extends Controller
 
         $subscriber->nom = $request->nom ?? $subscriber->nom ?? 'Abonné OPN';
         $subscriber->organisation = $request->organisation ?? $subscriber->organisation ?? 'Citoyen / Professionnel';
+        $featuredArticle = $this->featuredArticle();
         $subscriber->statut = 'ACTIF';
         $subscriber->ip_address = $request->ip();
-        $subscriber->derniere_newsletter_id = 'ACT-01'; // Article en poster / premier plan
+        $subscriber->derniere_newsletter_id = $featuredArticle['id'] ?? 'ACT-01';
         $subscriber->derniere_newsletter_date = now();
         $subscriber->save();
-
-        // Article en poster / mis en premier plan
-        $featuredArticle = [
-            'id' => 'ACT-01',
-            'title' => 'Réception de 45 tonnes de solutés massifs au Hub Central d\'Owendo',
-            'date' => '06 Septembre 2026',
-            'tag' => 'Logistique & Approvisionnement',
-            'tagColor' => 'bg-[#2E68B4] text-white',
-            'summary' => 'Arrivée au port d\'Owendo d\'un convoi maritime prioritaire composé de chlorure de sodium, glucose et solutés de réanimation destinés aux CHU et hôpitaux régionaux.',
-            'content' => 'La Direction Générale de l\'OPN a supervisé la réception de 45 tonnes métriques de solutés massifs. Ce lot stratégique permet de sécuriser 90 jours d\'autonomie pour les 9 provinces du Gabon. Le dispatching vers les antennes de l\'intérieur du pays a débuté ce matin via le convoi ferroviaire Setrag et des camions sécurisés climatisés.',
-        ];
 
         return response()->json([
             'success' => true,
@@ -130,5 +122,38 @@ class NewsletterController extends Controller
             ],
             'broadcasted_at' => now()->toIso8601String(),
         ]);
+    }
+
+    private function featuredArticle(): array
+    {
+        if (Schema::hasTable('actualites')) {
+            $article = Actualite::query()
+                ->where('publie', true)
+                ->orderByDesc('mis_en_avant')
+                ->orderBy('ordre')
+                ->first();
+
+            if ($article) {
+                return [
+                    'id' => $article->code,
+                    'title' => $article->titre,
+                    'date' => $article->date_label,
+                    'tag' => $article->tag,
+                    'tagColor' => $article->tag_color,
+                    'summary' => $article->resume,
+                    'content' => $article->contenu,
+                ];
+            }
+        }
+
+        return [
+            'id' => 'ACT-01',
+            'title' => "Réception de 45 tonnes de solutés massifs au Hub Central d'Owendo",
+            'date' => '06 Septembre 2026',
+            'tag' => 'Logistique & Approvisionnement',
+            'tagColor' => 'bg-[#2E68B4] text-white',
+            'summary' => "Arrivée au port d'Owendo d'un convoi maritime prioritaire.",
+            'content' => "La Direction Générale de l'OPN a supervisé la réception de solutés massifs destinés aux provinces.",
+        ];
     }
 }

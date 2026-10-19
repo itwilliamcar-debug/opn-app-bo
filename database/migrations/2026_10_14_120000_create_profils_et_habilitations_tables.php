@@ -33,6 +33,7 @@ return new class extends Migration
             $table->boolean('lire')->default(false);
             $table->boolean('modifier')->default(false);
             $table->boolean('valider')->default(false);
+            $table->boolean('supprimer')->default(false);
             $table->timestamps();
             $table->unique(['habilitation_id', 'profil_id']);
         });

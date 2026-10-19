@@ -14,6 +14,8 @@ class LigneCommandeTerritoriale extends Model
         'produit_id',
         'designation',
         'quantite_demandee',
+        'quantite_prise_en_charge',
+        'quantite_reliquat',
         'quantite_dispersee',
         'prix_unitaire_xaf',
     ];

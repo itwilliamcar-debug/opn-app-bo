@@ -31,6 +31,7 @@ class AntenneProvinciale extends Model
         'stock_valeur_xaf',
         'statut_stock',
         'couverture_jours',
+        'description',
         'is_active',
     ];
 

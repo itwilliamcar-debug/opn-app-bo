@@ -26,6 +26,8 @@ use App\Http\Controllers\Api\PatrimoineController;
 use App\Http\Controllers\Api\OrganisationController;
 use App\Http\Controllers\Api\ReferentielController;
 use App\Http\Controllers\Api\ParametrageController;
+use App\Http\Controllers\Api\SitePublicController;
+use App\Http\Controllers\Api\CommercialController;
 
 /*
 |--------------------------------------------------------------------------
@@ -42,6 +44,7 @@ Route::prefix('v1')->group(function () {
     Route::post('/auth/verify-2fa', [AuthController::class, 'verify2fa'])->middleware('throttle:30,1');
     Route::post('/auth/demo-quick', [AuthController::class, 'demoQuick'])->middleware('throttle:60,1');
     Route::post('/newsletter/subscribe', [NewsletterController::class, 'subscribe'])->middleware('throttle:10,1');
+    Route::get('/site', [SitePublicController::class, 'index'])->middleware('throttle:60,1');
     Route::post('/helpdesk/password-reset-request', [HelpdeskController::class, 'requestPasswordReset'])->middleware('throttle:5,1');
 
     // Snapshot JSON (polling multi-utilisateurs) — privilégié vs SSE
@@ -152,6 +155,7 @@ Route::prefix('v1')->group(function () {
 
         Route::get('/flux/commandes', [FluxApprovisionnementController::class, 'index']);
         Route::post('/flux/commandes', [FluxApprovisionnementController::class, 'store']);
+        Route::post('/flux/commandes/{id}/transferer', [FluxApprovisionnementController::class, 'transferer']);
         Route::post('/flux/commandes/{id}/transmettre', [FluxApprovisionnementController::class, 'transmettre']);
         Route::post('/flux/commandes/{id}/disperser', [FluxApprovisionnementController::class, 'disperser']);
         Route::post('/flux/commandes/{id}/rejeter', [FluxApprovisionnementController::class, 'rejeter']);
@@ -179,6 +183,16 @@ Route::prefix('v1')->group(function () {
         Route::delete('/referentiel/{ressource}/{id}', [ReferentielController::class, 'destroy']);
 
         Route::get('/organisation', [OrganisationController::class, 'index']);
+
+        // Commercial / prospection vendeur
+        Route::get('/commercial/referentiel', [CommercialController::class, 'referentielOptions']);
+        Route::get('/commercial/prospects', [CommercialController::class, 'index']);
+        Route::post('/commercial/prospects', [CommercialController::class, 'store']);
+        Route::get('/commercial/prospects/{id}', [CommercialController::class, 'show']);
+        Route::put('/commercial/prospects/{id}', [CommercialController::class, 'update']);
+        Route::delete('/commercial/prospects/{id}', [CommercialController::class, 'destroy']);
+        Route::post('/commercial/prospects/{id}/visites', [CommercialController::class, 'storeVisite']);
+        Route::post('/commercial/prospects/{id}/convertir', [CommercialController::class, 'convertir']);
 
         Route::get('/patrimoine', [PatrimoineController::class, 'index']);
         Route::post('/patrimoine', [PatrimoineController::class, 'store']);
