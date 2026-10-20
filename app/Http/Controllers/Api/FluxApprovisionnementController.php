@@ -133,7 +133,9 @@ class FluxApprovisionnementController extends Controller
 
             $creeeParChef = in_array($user->code_role, ['CHEF_ANTENNE_PROVINCIALE', 'PHARMACIEN_CHEF_ANTENNE'], true);
             $creeeParDg = $user->code_role === 'DG';
-            $statutInitial = $creeeParChef ? 'EFFECTUEE_CHEF_ANTENNE' : 'SOUMISE_ANTENNE';
+            $now = now();
+            // Le bon du chef part tout de suite vers la Direction générale.
+            $statutInitial = $creeeParChef ? 'TRANSFEREE_SIEGE' : 'SOUMISE_ANTENNE';
             // Chef : à son nom. Direction générale : identifiable comme telle, destinée à l'antenne choisie.
             $partenaireNom = $creeeParDg ? 'Direction générale' : ($creeeParChef ? $user->name : $data['partenaire_nom']);
             $partenaireType = $creeeParDg ? 'DIRECTION_GENERALE' : ($creeeParChef ? 'ANTENNE' : ($data['partenaire_type'] ?? 'PHARMACIE'));
@@ -149,21 +151,50 @@ class FluxApprovisionnementController extends Controller
                 'statut' => $statutInitial,
                 'motif' => $data['motif'] ?? null,
                 'montant_total_xaf' => $montant,
+                'transferee_au_siege_at' => $creeeParChef ? $now : null,
+                'transferee_au_siege_par_user_id' => $creeeParChef ? $user->id : null,
+                'transferee_au_siege_par_nom' => $creeeParChef ? $user->name : null,
+                'transmise_at' => $creeeParChef ? $now : null,
+                'transmise_par_nom' => $creeeParChef ? $user->name : null,
             ]);
             foreach ($lignes as $ligne) {
                 $commande->lignes()->create($ligne);
             }
 
             $commande->load('antenne');
-            $antenneNom = $commande->antenne?->nom ?? $commande->antenne_id;
+            $antenneNom = $commande->antenne?->nom ?? ('Antenne #'.$commande->antenne_id);
             if ($creeeParDg) {
                 $detailCreation = 'Commande de la Direction générale ('.$user->name.') passée à l\'antenne '.$antenneNom;
             } elseif ($creeeParChef) {
-                $detailCreation = 'Demande effectuée par le chef d\'antenne '.$user->name;
+                $detailCreation = 'Commande générée par l\'antenne '.$antenneNom.' ('.$user->name.')';
             } else {
                 $detailCreation = 'Commande de '.$user->name.' pour l\'antenne '.$antenneNom;
             }
             $this->journaliser($commande, $user, 'CREATION', $detailCreation);
+
+            if ($creeeParChef) {
+                $qteTotale = collect($lignes)->sum('quantite_demandee');
+                FluxTransfertSiege::create([
+                    'commande_id' => $commande->id,
+                    'antenne_id' => $commande->antenne_id,
+                    'user_id' => $user->id,
+                    'auteur_nom' => $user->name,
+                    'auteur_role' => $user->role,
+                    'antenne_nom' => $antenneNom,
+                    'annee' => (int) $now->format('Y'),
+                    'mois' => (int) $now->format('n'),
+                    'nb_lignes' => count($lignes),
+                    'quantite_totale' => $qteTotale,
+                    'transferee_at' => $now,
+                    'detail' => 'Bon du chef transféré à la Direction générale dès l\'enregistrement',
+                ]);
+                $this->journaliser(
+                    $commande,
+                    $user,
+                    'TRANSFERT',
+                    'Transférée à la Direction générale par '.$user->name.' (antenne '.$antenneNom.')'
+                );
+            }
 
             return $commande->load(['antenne', 'lignes', 'journal']);
         });
