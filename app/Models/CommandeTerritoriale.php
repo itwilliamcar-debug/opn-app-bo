@@ -71,4 +71,9 @@ class CommandeTerritoriale extends Model
     {
         return $this->hasMany(FluxPriseEnChargeSiege::class, 'commande_id')->orderBy('id');
     }
+
+    public function pieces(): HasMany
+    {
+        return $this->hasMany(FluxPieceCommerciale::class, 'commande_id')->orderByDesc('id');
+    }
 }

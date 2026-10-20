@@ -42,6 +42,7 @@ Route::prefix('v1')->group(function () {
     // --- PUBLIC (no token) ---
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:30,1');
     Route::post('/auth/verify-2fa', [AuthController::class, 'verify2fa'])->middleware('throttle:30,1');
+    Route::post('/auth/confirm-totp', [AuthController::class, 'confirmTotp'])->middleware('throttle:30,1');
     Route::post('/auth/demo-quick', [AuthController::class, 'demoQuick'])->middleware('throttle:60,1');
     Route::post('/newsletter/subscribe', [NewsletterController::class, 'subscribe'])->middleware('throttle:10,1');
     Route::get('/site', [SitePublicController::class, 'index'])->middleware('throttle:60,1');
@@ -160,6 +161,9 @@ Route::prefix('v1')->group(function () {
         Route::post('/flux/commandes/{id}/disperser', [FluxApprovisionnementController::class, 'disperser']);
         Route::post('/flux/commandes/{id}/rejeter', [FluxApprovisionnementController::class, 'rejeter']);
         Route::delete('/flux/commandes/{id}', [FluxApprovisionnementController::class, 'supprimer']);
+        Route::get('/flux/documents', [FluxApprovisionnementController::class, 'documents']);
+        Route::get('/flux/documents/{id}/pdf', [FluxApprovisionnementController::class, 'documentPdf']);
+        Route::get('/flux/documents/{id}', [FluxApprovisionnementController::class, 'document']);
 
         Route::get('/parametrage/territoire', [ParametrageController::class, 'territoire']);
         Route::get('/parametrage/utilisateurs', [ParametrageController::class, 'utilisateurs']);
@@ -177,6 +181,7 @@ Route::prefix('v1')->group(function () {
         Route::put('/parametrage/profils/{id}/habilitations', [ParametrageController::class, 'syncProfilHabilitations']);
 
         Route::get('/referentiel', [ReferentielController::class, 'ressources']);
+        Route::post('/referentiel/medicaments/import', [ReferentielController::class, 'importMedicaments']);
         Route::get('/referentiel/{ressource}', [ReferentielController::class, 'index']);
         Route::post('/referentiel/{ressource}', [ReferentielController::class, 'store']);
         Route::put('/referentiel/{ressource}/{id}', [ReferentielController::class, 'update']);

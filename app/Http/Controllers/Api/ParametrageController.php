@@ -10,6 +10,7 @@ use App\Models\HabilitationProfil;
 use App\Models\Profil;
 use App\Models\Province;
 use App\Models\User;
+use App\Services\AuthModeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -18,6 +19,9 @@ use Illuminate\Validation\Rule;
 class ParametrageController extends Controller
 {
     private const PROFILS_PLEIN_DROIT = ['sa', 'dsi'];
+
+    /** Profils autorisés à activer OTP / Google Authenticator sur un compte. */
+    private const PROFILS_GESTION_AUTH = ['sa', 'dsi', 'admin_metier'];
 
     public function utilisateurs(): JsonResponse
     {
@@ -47,10 +51,19 @@ class ParametrageController extends Controller
             'poste_comptable' => 'nullable|string|max:120',
             'etat' => 'nullable|in:actif,inactif',
             'password' => 'nullable|string|min:6',
+            'auth_mode' => ['nullable', Rule::in(AuthModeService::MODES)],
             'province_rattachement_id' => 'required|exists:provinces,id',
             'antenne_id' => 'required|exists:antennes_provinciales,id',
             'direction_id' => 'nullable|exists:directions,id',
         ]);
+        $authMode = $data['auth_mode'] ?? AuthModeService::MODE_SIMPLE;
+        unset($data['auth_mode']);
+        if ($authMode !== AuthModeService::MODE_SIMPLE && !$this->peutGererAuthMode($request)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Seul un Super Admin ou Admin Métier peut activer OTP / Google Authenticator.',
+            ], 403);
+        }
         $profil = Profil::findOrFail($data['profil_id']);
         $user = User::create([
             'name' => $data['name'],
@@ -59,12 +72,16 @@ class ParametrageController extends Controller
             'profil_id' => $profil->id,
             'poste_comptable' => $data['poste_comptable'] ?? null,
             'etat' => $data['etat'] ?? 'actif',
+            'auth_mode' => AuthModeService::MODE_SIMPLE,
             'role' => $profil->libelle,
             'code_role' => $this->codeRole($profil->code),
             ...$this->rattachement($data),
         ]);
+        if ($authMode !== AuthModeService::MODE_SIMPLE) {
+            app(AuthModeService::class)->appliquerMode($user, $authMode);
+        }
 
-        return response()->json(['success' => true, 'utilisateur' => $this->utilisateur($user->load(['profil', 'antenne', 'provinceRattachement', 'direction']))], 201);
+        return response()->json(['success' => true, 'utilisateur' => $this->utilisateur($user->fresh(['profil', 'antenne', 'provinceRattachement', 'direction']))], 201);
     }
 
     public function updateUtilisateur(Request $request, int $id): JsonResponse
@@ -77,12 +94,24 @@ class ParametrageController extends Controller
             'poste_comptable' => 'nullable|string|max:120',
             'etat' => 'sometimes|in:actif,inactif',
             'password' => 'nullable|string|min:6',
+            'auth_mode' => ['sometimes', Rule::in(AuthModeService::MODES)],
             'province_rattachement_id' => 'sometimes|exists:provinces,id',
             'antenne_id' => 'sometimes|exists:antennes_provinciales,id',
             'direction_id' => 'nullable|exists:directions,id',
         ]);
         if (empty($data['password'])) {
             unset($data['password']);
+        }
+        $nouveauMode = $data['auth_mode'] ?? null;
+        unset($data['auth_mode']);
+        if ($nouveauMode !== null) {
+            $modeActuel = app(AuthModeService::class)->modeEffectif($user);
+            if ($nouveauMode !== $modeActuel && !$this->peutGererAuthMode($request)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Seul un Super Admin ou Admin Métier peut modifier le mode d\'authentification.',
+                ], 403);
+            }
         }
         if (!empty($data['profil_id'])) {
             $profil = Profil::findOrFail($data['profil_id']);
@@ -97,6 +126,9 @@ class ParametrageController extends Controller
             ]));
         }
         $user->update($data);
+        if ($nouveauMode !== null) {
+            app(AuthModeService::class)->appliquerMode($user->fresh(), $nouveauMode);
+        }
 
         return response()->json(['success' => true, 'utilisateur' => $this->utilisateur($user->fresh(['profil', 'antenne', 'provinceRattachement', 'direction']))]);
     }
@@ -263,11 +295,15 @@ class ParametrageController extends Controller
 
     private function utilisateur(User $user): array
     {
+        $mode = app(AuthModeService::class)->modeEffectif($user);
+
         return [
             'id' => $user->id,
             'email' => $user->email,
             'name' => $user->name,
             'etat' => $user->etat ?: 'actif',
+            'auth_mode' => $mode,
+            'totp_confirmed' => $mode === AuthModeService::MODE_TOTP && (bool) $user->totp_confirmed_at,
             'poste_comptable' => $user->poste_comptable,
             'profil_id' => $user->profil_id,
             'profil' => $user->profil?->libelle,
@@ -280,6 +316,21 @@ class ParametrageController extends Controller
             'direction_id' => $user->direction_id,
             'direction' => $user->direction?->nom,
         ];
+    }
+
+    private function peutGererAuthMode(Request $request): bool
+    {
+        $acteur = $request->user();
+        if (!$acteur) {
+            return false;
+        }
+        $acteur->loadMissing('profil');
+        $code = $acteur->profil?->code;
+        if ($code && in_array($code, self::PROFILS_GESTION_AUTH, true)) {
+            return true;
+        }
+
+        return in_array($acteur->code_role, ['SUPER_ADMIN', 'ADMIN_METIER'], true);
     }
 
     /**

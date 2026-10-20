@@ -5,16 +5,20 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AntenneProvinciale;
 use App\Models\CommandeTerritoriale;
+use App\Models\FluxPieceCommerciale;
 use App\Models\FluxPriseEnChargeSiege;
 use App\Models\FluxTransfertSiege;
 use App\Models\ProduitPharmaceutique;
+use App\Services\FluxPieceCommercialeService;
+use App\Services\FluxPiecePdfService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 
 class FluxApprovisionnementController extends Controller
 {
-    private const ROLES_COMMANDE = ['DEMANDEUR_PHARMACIEN', 'DEMANDEUR_STRUCTURE', 'SUPER_ADMIN', 'ADMIN_METIER', 'CHEF_ANTENNE_PROVINCIALE', 'PHARMACIEN_CHEF_ANTENNE'];
+    private const ROLES_COMMANDE = ['DEMANDEUR_PHARMACIEN', 'DEMANDEUR_STRUCTURE', 'SUPER_ADMIN', 'ADMIN_METIER', 'CHEF_ANTENNE_PROVINCIALE', 'PHARMACIEN_CHEF_ANTENNE', 'DG'];
     private const ROLES_ANTENNE = ['CHEF_ANTENNE_PROVINCIALE', 'PHARMACIEN_CHEF_ANTENNE', 'SUPER_ADMIN', 'ADMIN_METIER'];
     private const ROLES_SIEGE = ['APPRO_NATIONAL', 'COLLABORATEUR_APPRO', 'DG', 'DIR', 'DAF', 'ACHATS', 'PHARMACIEN_CHEF_NATIONAL', 'SUPER_ADMIN', 'ADMIN_METIER'];
 
@@ -24,7 +28,7 @@ class FluxApprovisionnementController extends Controller
         $stage = $this->voitToutesLesDemandes($user) ? 'supervision' : $this->stage($user->code_role);
         $antenneCompte = $this->antenneDuCompte($user);
 
-        $query = CommandeTerritoriale::with(['antenne', 'lignes', 'journal'])->orderByDesc('id');
+        $query = CommandeTerritoriale::with(['antenne', 'lignes', 'journal', 'pieces.lignes'])->orderByDesc('id');
 
         /* Seuls le demandeur et l'antenne sont limités. L'admin métier voit tout. */
         if (!$this->voitToutesLesDemandes($user) && $stage === 'commande') {
@@ -86,9 +90,10 @@ class FluxApprovisionnementController extends Controller
             'lignes.*.quantite_demandee' => 'required|integer|min:1',
         ]);
 
-        /* L'antenne de la commande est celle du compte, pas celle envoyée par le formulaire. */
+        /* L'antenne de la commande est celle du compte, sauf pour la Direction générale qui choisit l'antenne de réception. */
         $antenneCompte = $this->antenneIdUtilisateur($user);
-        if (!in_array($user->code_role, ['SUPER_ADMIN', 'ADMIN_METIER'], true)) {
+        $choisitAntenne = in_array($user->code_role, ['SUPER_ADMIN', 'ADMIN_METIER', 'DG'], true);
+        if (!$choisitAntenne) {
             if (!$antenneCompte) {
                 return response()->json(['success' => false, 'message' => 'Aucune antenne n\'est rattachée à ce compte.'], 422);
             }
@@ -127,10 +132,11 @@ class FluxApprovisionnementController extends Controller
             }
 
             $creeeParChef = in_array($user->code_role, ['CHEF_ANTENNE_PROVINCIALE', 'PHARMACIEN_CHEF_ANTENNE'], true);
+            $creeeParDg = $user->code_role === 'DG';
             $statutInitial = $creeeParChef ? 'EFFECTUEE_CHEF_ANTENNE' : 'SOUMISE_ANTENNE';
-            // Demande du chef : toujours à son nom (pas une pharmacie tierce).
-            $partenaireNom = $creeeParChef ? $user->name : $data['partenaire_nom'];
-            $partenaireType = $creeeParChef ? 'ANTENNE' : ($data['partenaire_type'] ?? 'PHARMACIE');
+            // Chef : à son nom. Direction générale : identifiable comme telle, destinée à l'antenne choisie.
+            $partenaireNom = $creeeParDg ? 'Direction générale' : ($creeeParChef ? $user->name : $data['partenaire_nom']);
+            $partenaireType = $creeeParDg ? 'DIRECTION_GENERALE' : ($creeeParChef ? 'ANTENNE' : ($data['partenaire_type'] ?? 'PHARMACIE'));
 
             $commande = CommandeTerritoriale::create([
                 'numero_commande' => 'CMD-'.now()->format('Ymd').'-'.str_pad((string) (CommandeTerritoriale::count() + 1), 4, '0', STR_PAD_LEFT),
@@ -149,9 +155,14 @@ class FluxApprovisionnementController extends Controller
             }
 
             $commande->load('antenne');
-            $detailCreation = $creeeParChef
-                ? 'Demande effectuée par le chef d\'antenne '.$user->name
-                : 'Commande de '.$user->name.' pour l\'antenne '.($commande->antenne->nom ?? $commande->antenne_id);
+            $antenneNom = $commande->antenne?->nom ?? $commande->antenne_id;
+            if ($creeeParDg) {
+                $detailCreation = 'Commande de la Direction générale ('.$user->name.') passée à l\'antenne '.$antenneNom;
+            } elseif ($creeeParChef) {
+                $detailCreation = 'Demande effectuée par le chef d\'antenne '.$user->name;
+            } else {
+                $detailCreation = 'Commande de '.$user->name.' pour l\'antenne '.$antenneNom;
+            }
             $this->journaliser($commande, $user, 'CREATION', $detailCreation);
 
             return $commande->load(['antenne', 'lignes', 'journal']);
@@ -270,8 +281,9 @@ class FluxApprovisionnementController extends Controller
         }
 
         $totalPris = array_sum(array_column($plan, 'qte'));
+        $piecesGenerees = null;
 
-        DB::transaction(function () use ($commande, $plan, $user, $data, $totalPris) {
+        DB::transaction(function () use ($commande, $plan, $user, $data, $totalPris, &$piecesGenerees) {
             foreach ($plan as $item) {
                 $row = $item['row'];
                 $prise = (int) $row->quantite_prise_en_charge + $item['qte'];
@@ -281,7 +293,7 @@ class FluxApprovisionnementController extends Controller
                 ]);
             }
 
-            $commande->refresh()->load('lignes');
+            $commande->refresh()->load(['lignes', 'antenne']);
             $statut = $this->calculerStatut($commande);
             $archive = $commande->lignes->sum(fn ($l) => max(0, (int) $l->quantite_demandee - (int) $l->quantite_prise_en_charge));
             $commande->update([
@@ -297,7 +309,7 @@ class FluxApprovisionnementController extends Controller
                     ? "Prise en charge siège : {$totalPris} unité(s). {$archive} unité(s) en reliquat."
                     : "Prise en charge siège complète ({$totalPris} unité(s)).");
 
-            FluxPriseEnChargeSiege::create([
+            $prise = FluxPriseEnChargeSiege::create([
                 'commande_id' => $commande->id,
                 'antenne_id' => $commande->antenne_id,
                 'user_id' => $user->id,
@@ -310,13 +322,114 @@ class FluxApprovisionnementController extends Controller
                 'prise_at' => now(),
             ]);
 
-            $this->journaliser($commande->fresh(), $user, 'PRISE_EN_CHARGE', $detail);
+            $piecesGenerees = app(FluxPieceCommercialeService::class)->genererApresPriseEnCharge(
+                $commande->fresh(['antenne', 'lignes']),
+                $prise,
+                $plan,
+                $user,
+                $totalPris,
+                $archive,
+                $detail
+            );
+
+            $this->journaliser(
+                $commande->fresh(),
+                $user,
+                'PRISE_EN_CHARGE',
+                $detail.' Documents : '.$piecesGenerees['bon_commande']->numero.' / '.$piecesGenerees['facture']->numero
+            );
         });
 
         return response()->json([
             'success' => true,
-            'commande' => $this->enrichirCommande($commande->fresh(['antenne', 'lignes', 'journal'])),
+            'commande' => $this->enrichirCommande($commande->fresh(['antenne', 'lignes', 'journal', 'pieces'])),
+            'bon_commande' => $piecesGenerees['bon_commande'] ?? null,
+            'facture' => $piecesGenerees['facture'] ?? null,
         ]);
+    }
+
+    /**
+     * Liste des bons de commande / factures selon le profil :
+     * - demandeur : ses pièces
+     * - chef d'antenne : pièces des demandeurs de son antenne
+     * - siège / DG / admin / super admin : toutes, groupées année → mois → antenne → demandeur
+     */
+    public function documents(Request $request): JsonResponse
+    {
+        $user = $request->user()->loadMissing(['profil:id,code']);
+        $stage = $this->voitToutesLesDemandes($user) ? 'supervision' : $this->stage($user->code_role);
+
+        $query = FluxPieceCommerciale::with(['lignes', 'antenne'])
+            ->orderByDesc('emitted_at')
+            ->orderByDesc('id');
+
+        if ($request->filled('type') && in_array($request->query('type'), [FluxPieceCommerciale::TYPE_BC, FluxPieceCommerciale::TYPE_FACTURE], true)) {
+            $query->where('type', $request->query('type'));
+        }
+
+        if (!$this->voitToutesLesDemandes($user) && $stage === 'commande') {
+            $query->where('demandeur_user_id', $user->id);
+        } elseif (!$this->voitToutesLesDemandes($user) && $stage === 'antenne') {
+            $antenneId = $this->antenneIdUtilisateur($user);
+            if ($antenneId) {
+                $query->where('antenne_id', $antenneId);
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        }
+
+        if ($request->filled('annee')) {
+            $query->where('annee', (int) $request->query('annee'));
+        }
+        if ($request->filled('mois')) {
+            $query->where('mois', (int) $request->query('mois'));
+        }
+        if ($request->filled('antenne_id')) {
+            $query->where('antenne_id', (int) $request->query('antenne_id'));
+        }
+
+        $pieces = $query->get();
+
+        $payload = [
+            'success' => true,
+            'stage' => $stage,
+            'compteurs' => [
+                'total' => $pieces->count(),
+                'bons_commande' => $pieces->where('type', FluxPieceCommerciale::TYPE_BC)->count(),
+                'factures' => $pieces->where('type', FluxPieceCommerciale::TYPE_FACTURE)->count(),
+            ],
+            'pieces' => $pieces,
+        ];
+
+        if (in_array($stage, ['siege', 'supervision', 'antenne'], true)) {
+            $payload['groupees'] = $this->grouperPieces($pieces);
+        }
+
+        return response()->json($payload);
+    }
+
+    public function document(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user()->loadMissing(['profil:id,code']);
+        $piece = FluxPieceCommerciale::with(['lignes', 'antenne', 'commande'])->findOrFail($id);
+
+        if (!$this->pieceVisible($user, $piece)) {
+            return response()->json(['success' => false, 'message' => 'Ce document n\'est pas accessible à ce profil.'], 403);
+        }
+
+        return response()->json(['success' => true, 'piece' => $piece]);
+    }
+
+    public function documentPdf(Request $request, int $id, FluxPiecePdfService $pdfService): Response|JsonResponse
+    {
+        $user = $request->user()->loadMissing(['profil:id,code']);
+        $piece = FluxPieceCommerciale::with(['lignes', 'antenne'])->findOrFail($id);
+
+        if (!$this->pieceVisible($user, $piece)) {
+            return response()->json(['success' => false, 'message' => 'Ce document n\'est pas accessible à ce profil.'], 403);
+        }
+
+        return $pdfService->telecharger($piece);
     }
 
     /**
@@ -498,6 +611,9 @@ class FluxApprovisionnementController extends Controller
                         ->map(function ($cmdsAntenne, $antenneId) {
                             $premiere = $cmdsAntenne->first();
                             $origines = $cmdsAntenne->groupBy(function ($c) {
+                                if (($c->partenaire_type ?? '') === 'DIRECTION_GENERALE') {
+                                    return 'direction_generale';
+                                }
                                 if (($c->partenaire_type ?? '') === 'ANTENNE') {
                                     return 'antenne';
                                 }
@@ -505,18 +621,23 @@ class FluxApprovisionnementController extends Controller
                                 return 'demandeur:'.($c->demandeur_user_id ?: mb_strtolower((string) $c->demandeur_nom));
                             })->map(function ($cmdsOrigine, $cle) {
                                 $premiereOrigine = $cmdsOrigine->first();
+                                $parDg = $cle === 'direction_generale';
                                 $parAntenne = $cle === 'antenne';
 
                                 return [
                                     'cle' => (string) $cle,
-                                    'type' => $parAntenne ? 'antenne' : 'demandeur',
-                                    'nom' => $premiereOrigine->demandeur_nom ?: ($parAntenne ? 'Antenne' : 'Demandeur'),
+                                    'type' => $parDg ? 'direction_generale' : ($parAntenne ? 'antenne' : 'demandeur'),
+                                    'nom' => $parDg ? 'Direction générale' : ($premiereOrigine->demandeur_nom ?: ($parAntenne ? 'Antenne' : 'Demandeur')),
                                     'role' => $premiereOrigine->demandeur_role,
                                     'partenaire_nom' => $premiereOrigine->partenaire_nom,
                                     'nb_commandes' => $cmdsOrigine->count(),
                                     'commandes' => $cmdsOrigine->values(),
                                 ];
-                            })->sortBy(fn ($origine) => ($origine['type'] === 'antenne' ? '0' : '1').$origine['nom'])->values();
+                            })->sortBy(fn ($origine) => match ($origine['type']) {
+                                'direction_generale' => '0',
+                                'antenne' => '1',
+                                default => '2',
+                            }.$origine['nom'])->values();
 
                             return [
                                 'antenne_id' => (int) $antenneId,
@@ -560,6 +681,84 @@ class FluxApprovisionnementController extends Controller
         return $noms[$mois] ?? (string) $mois;
     }
 
+    /** Regroupe BC/factures : année → mois → antenne → demandeur. */
+    private function grouperPieces($pieces): array
+    {
+        return $pieces
+            ->groupBy(fn ($p) => (int) ($p->annee ?: now()->year))
+            ->map(function ($cmdsAnnee, $annee) {
+                $mois = $cmdsAnnee->groupBy(fn ($p) => (int) ($p->mois ?: 1))
+                    ->map(function ($cmdsMois, $numeroMois) {
+                        $antennes = $cmdsMois->groupBy(fn ($p) => (string) ($p->antenne_id ?: '0'))
+                            ->map(function ($cmdsAntenne) {
+                                $first = $cmdsAntenne->first();
+                                $demandeurs = $cmdsAntenne->groupBy(fn ($p) => (string) ($p->demandeur_user_id ?: $p->demandeur_nom ?: 'n/a'))
+                                    ->map(function ($cmdsDem) {
+                                        $d = $cmdsDem->first();
+
+                                        return [
+                                            'demandeur_user_id' => $d->demandeur_user_id,
+                                            'demandeur_nom' => $d->demandeur_nom,
+                                            'partenaire_nom' => $d->partenaire_nom,
+                                            'nb_pieces' => $cmdsDem->count(),
+                                            'bons_commande' => $cmdsDem->where('type', FluxPieceCommerciale::TYPE_BC)->values(),
+                                            'factures' => $cmdsDem->where('type', FluxPieceCommerciale::TYPE_FACTURE)->values(),
+                                            'pieces' => $cmdsDem->values(),
+                                        ];
+                                    })
+                                    ->sortBy('demandeur_nom')
+                                    ->values();
+
+                                return [
+                                    'antenne_id' => $first->antenne_id,
+                                    'antenne_nom' => $first->antenne_nom ?: ($first->antenne?->nom ?? 'Antenne'),
+                                    'nb_pieces' => $cmdsAntenne->count(),
+                                    'demandeurs' => $demandeurs,
+                                ];
+                            })
+                            ->sortBy('antenne_nom')
+                            ->values();
+
+                        return [
+                            'mois' => (int) $numeroMois,
+                            'libelle' => $this->libelleMois((int) $numeroMois),
+                            'nb_pieces' => $cmdsMois->count(),
+                            'antennes' => $antennes,
+                        ];
+                    })
+                    ->sortByDesc('mois')
+                    ->values();
+
+                return [
+                    'annee' => (int) $annee,
+                    'nb_pieces' => $cmdsAnnee->count(),
+                    'mois' => $mois,
+                ];
+            })
+            ->sortByDesc('annee')
+            ->values()
+            ->all();
+    }
+
+    private function pieceVisible($user, FluxPieceCommerciale $piece): bool
+    {
+        if ($this->voitToutesLesDemandes($user)) {
+            return true;
+        }
+
+        $stage = $this->stage($user->code_role);
+        if ($stage === 'commande') {
+            return (int) $piece->demandeur_user_id === (int) $user->id;
+        }
+        if ($stage === 'antenne') {
+            $antenneId = $this->antenneIdUtilisateur($user);
+
+            return $antenneId && (int) $piece->antenne_id === (int) $antenneId;
+        }
+
+        return true;
+    }
+
     /** Ajoute la traçabilité et les totaux quantités à une commande. */
     private function enrichirCommande(CommandeTerritoriale $commande): CommandeTerritoriale
     {
@@ -583,12 +782,18 @@ class FluxApprovisionnementController extends Controller
             'dispersee_at' => $commande->dispersee_at,
         ]);
         $commande->setAttribute('initiee_par_antenne', ($commande->partenaire_type ?? '') === 'ANTENNE');
+        $commande->setAttribute('initiee_par_direction_generale', ($commande->partenaire_type ?? '') === 'DIRECTION_GENERALE');
         $commande->setAttribute('quantites', [
             'demandee' => $demande,
             'prise' => $prise,
             'reliquat' => $reliquat,
             'dispersee' => $dispersee,
         ]);
+
+        if ($commande->relationLoaded('pieces')) {
+            $commande->setAttribute('bons_commande', $commande->pieces->where('type', FluxPieceCommerciale::TYPE_BC)->values());
+            $commande->setAttribute('factures', $commande->pieces->where('type', FluxPieceCommerciale::TYPE_FACTURE)->values());
+        }
 
         return $commande;
     }

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ProduitPharmaceutique extends Model
@@ -17,11 +18,15 @@ class ProduitPharmaceutique extends Model
         'designation',
         'dci',
         'forme',
+        'forme_id',
         'dosage',
         'conditionnement',
         'categorie',
+        'categorie_id',
         'laboratoire',
+        'pays_provenance_id',
         'unite_gestion',
+        'unite_gestion_id',
         'prix_unitaire_xaf',
         'prix_public_plafonne_xaf',
         'stock_national',
@@ -38,6 +43,26 @@ class ProduitPharmaceutique extends Model
         'prix_public_plafonne_xaf' => 'decimal:2',
         'is_public_catalogue' => 'boolean',
     ];
+
+    public function categorieRef(): BelongsTo
+    {
+        return $this->belongsTo(CategorieMedicament::class, 'categorie_id');
+    }
+
+    public function formeRef(): BelongsTo
+    {
+        return $this->belongsTo(FormeGalenique::class, 'forme_id');
+    }
+
+    public function uniteRef(): BelongsTo
+    {
+        return $this->belongsTo(UniteGestion::class, 'unite_gestion_id');
+    }
+
+    public function paysProvenance(): BelongsTo
+    {
+        return $this->belongsTo(Pays::class, 'pays_provenance_id');
+    }
 
     public function lots(): HasMany
     {

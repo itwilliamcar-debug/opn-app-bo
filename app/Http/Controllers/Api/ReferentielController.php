@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AntenneProvinciale;
+use App\Models\CategorieMedicament;
 use App\Models\Departement;
 use App\Models\Direction;
+use App\Models\FormeGalenique;
 use App\Models\Fournisseur;
 use App\Models\Pays;
 use App\Models\ProduitPharmaceutique;
@@ -13,13 +15,16 @@ use App\Models\Province;
 use App\Models\StructureSanitaire;
 use App\Models\TypeFournisseur;
 use App\Models\TypeStructure;
+use App\Models\UniteGestion;
 use App\Models\User;
 use App\Models\Ville;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class ReferentielController extends Controller
@@ -89,6 +94,146 @@ class ReferentielController extends Controller
         }
 
         return response()->json(['success' => true, 'row' => $def['present']($model->fresh())], 201);
+    }
+
+    /**
+     * Import Excel/CSV des médicaments (lignes déjà parsées côté front).
+     * Colonnes attendues : code_produit, designation, dci, categorie, forme, dosage,
+     * conditionnement, unite_gestion, pays_provenance, laboratoire, prix_unitaire_xaf,
+     * prix_public_plafonne_xaf, stock_national, seuil_min_national, seuil_critique_national, statut.
+     */
+    public function importMedicaments(Request $request): JsonResponse
+    {
+        $payload = $request->validate([
+            'lignes' => 'required|array|min:1|max:2000',
+            'lignes.*.code_produit' => 'required|string|max:50',
+            'lignes.*.designation' => 'required|string|max:255',
+            'lignes.*.dci' => 'required|string|max:255',
+            'lignes.*.categorie' => 'required|string|max:150',
+            'lignes.*.forme' => 'required|string|max:150',
+            'lignes.*.dosage' => 'required|string|max:150',
+            'lignes.*.conditionnement' => 'required|string|max:150',
+            'lignes.*.unite_gestion' => 'required|string|max:80',
+            'lignes.*.pays_provenance' => 'nullable|string|max:150',
+            'lignes.*.laboratoire' => 'nullable|string|max:150',
+            'lignes.*.prix_unitaire_xaf' => 'required|numeric|min:0',
+            'lignes.*.prix_public_plafonne_xaf' => 'required|numeric|min:0',
+            'lignes.*.stock_national' => 'required|integer|min:0',
+            'lignes.*.seuil_min_national' => 'nullable|integer|min:0',
+            'lignes.*.seuil_critique_national' => 'nullable|integer|min:0',
+            'lignes.*.statut' => 'nullable|string|max:40',
+        ]);
+
+        $crees = 0;
+        $misAJour = 0;
+        $erreurs = [];
+
+        DB::transaction(function () use ($payload, &$crees, &$misAJour, &$erreurs) {
+            foreach ($payload['lignes'] as $index => $ligne) {
+                $numero = $index + 2; // ligne Excel (en-tête = 1)
+                try {
+                    $categorie = $this->trouverOuCreerLibelle(CategorieMedicament::class, (string) $ligne['categorie']);
+                    $forme = $this->trouverOuCreerLibelle(FormeGalenique::class, (string) $ligne['forme']);
+                    $unite = $this->trouverOuCreerLibelle(UniteGestion::class, (string) $ligne['unite_gestion']);
+                    $paysId = $this->trouverPaysId($ligne['pays_provenance'] ?? null);
+
+                    $data = [
+                        'designation' => $ligne['designation'],
+                        'dci' => $ligne['dci'],
+                        'categorie_id' => $categorie->id,
+                        'categorie' => $categorie->libelle,
+                        'forme_id' => $forme->id,
+                        'forme' => $forme->libelle,
+                        'dosage' => $ligne['dosage'],
+                        'conditionnement' => $ligne['conditionnement'],
+                        'unite_gestion_id' => $unite->id,
+                        'unite_gestion' => $unite->libelle,
+                        'pays_provenance_id' => $paysId,
+                        'laboratoire' => $ligne['laboratoire'] ?? null,
+                        'prix_unitaire_xaf' => $ligne['prix_unitaire_xaf'],
+                        'prix_public_plafonne_xaf' => $ligne['prix_public_plafonne_xaf'],
+                        'stock_national' => (int) $ligne['stock_national'],
+                        'seuil_min_national' => isset($ligne['seuil_min_national']) ? (int) $ligne['seuil_min_national'] : 1000,
+                        'seuil_critique_national' => isset($ligne['seuil_critique_national']) ? (int) $ligne['seuil_critique_national'] : 500,
+                        'statut' => strtoupper((string) ($ligne['statut'] ?: 'DISPONIBLE')),
+                    ];
+
+                    $existant = ProduitPharmaceutique::query()
+                        ->where('code_produit', $ligne['code_produit'])
+                        ->first();
+
+                    if ($existant) {
+                        $existant->update($data);
+                        $misAJour++;
+                    } else {
+                        ProduitPharmaceutique::create([
+                            'code_produit' => $ligne['code_produit'],
+                            ...$data,
+                        ]);
+                        $crees++;
+                    }
+                } catch (\Throwable $e) {
+                    $erreurs[] = [
+                        'ligne' => $numero,
+                        'code' => $ligne['code_produit'] ?? '',
+                        'message' => $e->getMessage(),
+                    ];
+                }
+            }
+        });
+
+        return response()->json([
+            'success' => true,
+            'crees' => $crees,
+            'mis_a_jour' => $misAJour,
+            'erreurs' => $erreurs,
+            'message' => sprintf(
+                'Import terminé : %d créé(s), %d mis à jour%s.',
+                $crees,
+                $misAJour,
+                count($erreurs) ? ', '.count($erreurs).' erreur(s)' : ''
+            ),
+        ]);
+    }
+
+    private function trouverOuCreerLibelle(string $modelClass, string $libelle)
+    {
+        $libelle = trim($libelle);
+        $existant = $modelClass::query()
+            ->whereRaw('LOWER(libelle) = ?', [mb_strtolower($libelle)])
+            ->first();
+        if ($existant) {
+            return $existant;
+        }
+        $code = Str::upper(Str::limit(Str::slug($libelle, '_'), 48, ''));
+        if ($code === '') {
+            $code = 'REF_'.substr(md5($libelle), 0, 8);
+        }
+        $base = $code;
+        $i = 1;
+        while ($modelClass::query()->where('code', $code)->exists()) {
+            $code = Str::limit($base.'_'.$i, 50, '');
+            $i++;
+        }
+
+        return $modelClass::create(['code' => $code, 'libelle' => $libelle]);
+    }
+
+    private function trouverPaysId(?string $valeur): ?int
+    {
+        $valeur = trim((string) $valeur);
+        if ($valeur === '') {
+            return null;
+        }
+        $needle = mb_strtolower($valeur);
+        $pays = Pays::query()
+            ->where(function ($query) use ($needle) {
+                $query->whereRaw('LOWER(nom) = ?', [$needle])
+                    ->orWhereRaw('LOWER(code) = ?', [$needle]);
+            })
+            ->first();
+
+        return $pays?->id;
     }
 
     public function update(Request $request, string $ressource, int $id): JsonResponse
@@ -187,6 +332,36 @@ class ReferentielController extends Controller
                     'label' => $filter['label'],
                     'options' => TypeFournisseur::query()->orderBy('libelle')->get(['id', 'libelle'])
                         ->map(fn (TypeFournisseur $type) => ['value' => (string) $type->id, 'label' => $type->libelle])
+                        ->all(),
+                ];
+                continue;
+            }
+            if (($filter['column'] ?? '') === 'categorie_id' && !isset($filter['options'])) {
+                $out[] = [
+                    'key' => $filter['key'],
+                    'label' => $filter['label'],
+                    'options' => CategorieMedicament::query()->orderBy('libelle')->get(['id', 'libelle'])
+                        ->map(fn (CategorieMedicament $row) => ['value' => (string) $row->id, 'label' => $row->libelle])
+                        ->all(),
+                ];
+                continue;
+            }
+            if (($filter['column'] ?? '') === 'forme_id' && !isset($filter['options'])) {
+                $out[] = [
+                    'key' => $filter['key'],
+                    'label' => $filter['label'],
+                    'options' => FormeGalenique::query()->orderBy('libelle')->get(['id', 'libelle'])
+                        ->map(fn (FormeGalenique $row) => ['value' => (string) $row->id, 'label' => $row->libelle])
+                        ->all(),
+                ];
+                continue;
+            }
+            if (($filter['column'] ?? '') === 'pays_provenance_id' && !isset($filter['options'])) {
+                $out[] = [
+                    'key' => $filter['key'],
+                    'label' => $filter['label'],
+                    'options' => Pays::query()->orderBy('nom')->get(['id', 'nom'])
+                        ->map(fn (Pays $pays) => ['value' => (string) $pays->id, 'label' => $pays->nom])
                         ->all(),
                 ];
                 continue;
@@ -301,6 +476,29 @@ class ReferentielController extends Controller
             }
         }
 
+        if ($ressource === 'medicaments') {
+            foreach (['pays_provenance_id', 'laboratoire', 'seuil_min_national', 'seuil_critique_national'] as $cle) {
+                if (array_key_exists($cle, $data) && $data[$cle] === '') {
+                    unset($data[$cle]);
+                }
+            }
+            if (array_key_exists('is_public_catalogue', $data)) {
+                $data['is_public_catalogue'] = in_array((string) $data['is_public_catalogue'], ['1', 'true', 'oui'], true);
+            }
+            $categorie = CategorieMedicament::find($data['categorie_id'] ?? 0);
+            $forme = FormeGalenique::find($data['forme_id'] ?? 0);
+            $unite = UniteGestion::find($data['unite_gestion_id'] ?? 0);
+            if ($categorie) {
+                $data['categorie'] = $categorie->libelle;
+            }
+            if ($forme) {
+                $data['forme'] = $forme->libelle;
+            }
+            if ($unite) {
+                $data['unite_gestion'] = $unite->libelle;
+            }
+        }
+
         return $data;
     }
 
@@ -321,54 +519,156 @@ class ReferentielController extends Controller
             'medicaments' => [
                 'label' => 'Médicaments',
                 'model' => ProduitPharmaceutique::class,
-                'search' => ['code_produit', 'designation', 'dci', 'laboratoire', 'categorie'],
+                'search' => ['code_produit', 'designation', 'dci', 'laboratoire', 'categorie', 'forme', 'conditionnement'],
                 'filters' => [
-                    ['key' => 'categorie', 'column' => 'categorie', 'label' => 'Catégorie'],
-                    ['key' => 'forme', 'column' => 'forme', 'label' => 'Forme'],
-                    ['key' => 'statut', 'column' => 'statut', 'label' => 'Statut'],
-                    ['key' => 'is_public_catalogue', 'column' => 'is_public_catalogue', 'label' => 'Catalogue public', 'options' => ['1', '0']],
+                    ['key' => 'categorie_id', 'column' => 'categorie_id', 'label' => 'Catégorie'],
+                    ['key' => 'forme_id', 'column' => 'forme_id', 'label' => 'Forme'],
+                    ['key' => 'pays_provenance_id', 'column' => 'pays_provenance_id', 'label' => 'Pays de provenance'],
+                    ['key' => 'statut', 'column' => 'statut', 'label' => 'Statut', 'options' => [
+                        ['value' => 'DISPONIBLE', 'label' => 'Disponible'],
+                        ['value' => 'STOCK_FAIBLE', 'label' => 'Stock faible'],
+                        ['value' => 'RUPTURE', 'label' => 'Rupture'],
+                        ['value' => 'INACTIF', 'label' => 'Inactif'],
+                    ]],
                 ],
                 'colonnes' => [
                     ['key' => 'code_produit', 'label' => 'Code'],
                     ['key' => 'designation', 'label' => 'Désignation'],
-                    ['key' => 'dci', 'label' => 'DCI'],
-                    ['key' => 'forme', 'label' => 'Forme'],
                     ['key' => 'categorie', 'label' => 'Catégorie'],
+                    ['key' => 'forme', 'label' => 'Forme'],
+                    ['key' => 'pays_provenance', 'label' => 'Pays de provenance'],
+                    ['key' => 'stock_national', 'label' => 'Quantité'],
+                    ['key' => 'prix_unitaire_xaf', 'label' => 'Prix U. XAF'],
                     ['key' => 'statut', 'label' => 'Statut'],
-                    ['key' => 'prix_unitaire_xaf', 'label' => 'Prix XAF'],
                 ],
                 'champs' => $this->champs([
                     ['code_produit', 'Code', 'text', true],
                     ['designation', 'Désignation', 'text', true],
                     ['dci', 'DCI', 'text', true],
-                    ['forme', 'Forme', 'text', true],
+                    ['categorie_id', 'Catégorie', 'select', true, 'categories_medicaments'],
+                    ['forme_id', 'Forme galénique', 'select', true, 'formes_galeniques'],
                     ['dosage', 'Dosage', 'text', true],
                     ['conditionnement', 'Conditionnement', 'text', true],
-                    ['categorie', 'Catégorie', 'text', true],
+                    ['unite_gestion_id', 'Unité de gestion', 'select', true, 'unites_gestion'],
+                    ['pays_provenance_id', 'Pays de provenance', 'select', false, 'pays'],
                     ['laboratoire', 'Laboratoire', 'text', false],
-                    ['unite_gestion', 'Unité', 'text', false],
-                    ['prix_unitaire_xaf', 'Prix unitaire', 'number', true],
-                    ['prix_public_plafonne_xaf', 'Prix public', 'number', true],
-                    ['statut', 'Statut', 'text', false],
-                    ['stock_national', 'Stock national', 'number', false],
+                    ['prix_unitaire_xaf', 'Prix unitaire (XAF)', 'number', true],
+                    ['prix_public_plafonne_xaf', 'Prix public plafonné (XAF)', 'number', true],
+                    ['stock_national', 'Quantité (stock national)', 'number', true],
+                    ['seuil_min_national', 'Seuil minimum', 'number', false],
+                    ['seuil_critique_national', 'Seuil critique', 'number', false],
+                    ['statut', 'Statut', 'select', true, 'statuts_medicament'],
+                    ['is_public_catalogue', 'Catalogue public', 'select', false, 'oui_non'],
                 ]),
                 'rules' => [
                     'code_produit' => 'required|string|max:50',
                     'designation' => 'required|string|max:255',
                     'dci' => 'required|string|max:255',
-                    'forme' => 'required|string|max:150',
+                    'categorie_id' => 'required|integer|exists:categories_medicaments,id',
+                    'forme_id' => 'required|integer|exists:formes_galeniques,id',
                     'dosage' => 'required|string|max:150',
                     'conditionnement' => 'required|string|max:150',
-                    'categorie' => 'required|string|max:100',
+                    'unite_gestion_id' => 'required|integer|exists:unites_gestion,id',
+                    'pays_provenance_id' => 'nullable|integer|exists:pays,id',
                     'laboratoire' => 'nullable|string|max:150',
-                    'unite_gestion' => 'nullable|string|max:50',
                     'prix_unitaire_xaf' => 'required|numeric|min:0',
                     'prix_public_plafonne_xaf' => 'required|numeric|min:0',
-                    'statut' => 'nullable|string|max:40',
-                    'stock_national' => 'nullable|integer|min:0',
+                    'stock_national' => 'required|integer|min:0',
+                    'seuil_min_national' => 'nullable|integer|min:0',
+                    'seuil_critique_national' => 'nullable|integer|min:0',
+                    'statut' => 'required|string|max:40',
+                    'is_public_catalogue' => 'nullable|boolean',
                 ],
-                'query' => fn () => ProduitPharmaceutique::query(),
-                'present' => fn (ProduitPharmaceutique $row) => $row->only(['id', 'code_produit', 'designation', 'dci', 'forme', 'dosage', 'conditionnement', 'categorie', 'laboratoire', 'unite_gestion', 'prix_unitaire_xaf', 'prix_public_plafonne_xaf', 'statut', 'stock_national']),
+                'query' => fn () => ProduitPharmaceutique::query()->with([
+                    'categorieRef:id,libelle',
+                    'formeRef:id,libelle',
+                    'uniteRef:id,libelle',
+                    'paysProvenance:id,nom',
+                ]),
+                'present' => fn (ProduitPharmaceutique $row) => [
+                    'id' => $row->id,
+                    'code_produit' => $row->code_produit,
+                    'designation' => $row->designation,
+                    'dci' => $row->dci,
+                    'categorie_id' => $row->categorie_id ? (string) $row->categorie_id : '',
+                    'forme_id' => $row->forme_id ? (string) $row->forme_id : '',
+                    'unite_gestion_id' => $row->unite_gestion_id ? (string) $row->unite_gestion_id : '',
+                    'pays_provenance_id' => $row->pays_provenance_id ? (string) $row->pays_provenance_id : '',
+                    'categorie' => $row->categorieRef?->libelle ?: $row->categorie,
+                    'forme' => $row->formeRef?->libelle ?: $row->forme,
+                    'unite_gestion' => $row->uniteRef?->libelle ?: $row->unite_gestion,
+                    'pays_provenance' => $row->paysProvenance?->nom ?: '—',
+                    'dosage' => $row->dosage,
+                    'conditionnement' => $row->conditionnement,
+                    'laboratoire' => $row->laboratoire,
+                    'prix_unitaire_xaf' => $row->prix_unitaire_xaf,
+                    'prix_public_plafonne_xaf' => $row->prix_public_plafonne_xaf,
+                    'stock_national' => $row->stock_national,
+                    'seuil_min_national' => $row->seuil_min_national,
+                    'seuil_critique_national' => $row->seuil_critique_national,
+                    'statut' => $row->statut,
+                    'is_public_catalogue' => $row->is_public_catalogue ? '1' : '0',
+                ],
+            ],
+            'categories_medicaments' => [
+                'label' => 'Catégories médicaments',
+                'model' => CategorieMedicament::class,
+                'search' => ['code', 'libelle'],
+                'filters' => [],
+                'colonnes' => [
+                    ['key' => 'code', 'label' => 'Code'],
+                    ['key' => 'libelle', 'label' => 'Libellé'],
+                ],
+                'champs' => $this->champs([
+                    ['code', 'Code', 'text', true],
+                    ['libelle', 'Libellé', 'text', true],
+                ]),
+                'rules' => [
+                    'code' => 'required|string|max:50',
+                    'libelle' => 'required|string|max:150',
+                ],
+                'query' => fn () => CategorieMedicament::query(),
+                'present' => fn (CategorieMedicament $row) => $row->only(['id', 'code', 'libelle']),
+            ],
+            'formes_galeniques' => [
+                'label' => 'Formes galéniques',
+                'model' => FormeGalenique::class,
+                'search' => ['code', 'libelle'],
+                'filters' => [],
+                'colonnes' => [
+                    ['key' => 'code', 'label' => 'Code'],
+                    ['key' => 'libelle', 'label' => 'Libellé'],
+                ],
+                'champs' => $this->champs([
+                    ['code', 'Code', 'text', true],
+                    ['libelle', 'Libellé', 'text', true],
+                ]),
+                'rules' => [
+                    'code' => 'required|string|max:50',
+                    'libelle' => 'required|string|max:150',
+                ],
+                'query' => fn () => FormeGalenique::query(),
+                'present' => fn (FormeGalenique $row) => $row->only(['id', 'code', 'libelle']),
+            ],
+            'unites_gestion' => [
+                'label' => 'Unités de gestion',
+                'model' => UniteGestion::class,
+                'search' => ['code', 'libelle'],
+                'filters' => [],
+                'colonnes' => [
+                    ['key' => 'code', 'label' => 'Code'],
+                    ['key' => 'libelle', 'label' => 'Libellé'],
+                ],
+                'champs' => $this->champs([
+                    ['code', 'Code', 'text', true],
+                    ['libelle', 'Libellé', 'text', true],
+                ]),
+                'rules' => [
+                    'code' => 'required|string|max:50',
+                    'libelle' => 'required|string|max:80',
+                ],
+                'query' => fn () => UniteGestion::query(),
+                'present' => fn (UniteGestion $row) => $row->only(['id', 'code', 'libelle']),
             ],
             'directions' => [
                 'label' => 'Directions',
@@ -708,17 +1008,17 @@ class ReferentielController extends Controller
                 ],
             ],
             'pays' => [
-                'label' => 'Pays',
+                'label' => 'Pays de provenance',
                 'model' => Pays::class,
                 'search' => ['code', 'nom'],
                 'filters' => [],
                 'colonnes' => [
                     ['key' => 'code', 'label' => 'Code'],
-                    ['key' => 'nom', 'label' => 'Pays'],
+                    ['key' => 'nom', 'label' => 'Pays de provenance'],
                 ],
                 'champs' => $this->champs([
                     ['code', 'Code', 'text', true],
-                    ['nom', 'Nom du pays', 'text', true],
+                    ['nom', 'Nom du pays de provenance', 'text', true],
                 ]),
                 'rules' => [
                     'code' => 'required|string|max:40',
@@ -872,6 +1172,21 @@ class ReferentielController extends Controller
                 ['value' => 'VIGILANCE', 'label' => 'Vigilance'],
                 ['value' => 'CRITIQUE', 'label' => 'Critique'],
             ],
+            'statuts_medicament' => [
+                ['value' => 'DISPONIBLE', 'label' => 'Disponible'],
+                ['value' => 'STOCK_FAIBLE', 'label' => 'Stock faible'],
+                ['value' => 'RUPTURE', 'label' => 'Rupture'],
+                ['value' => 'INACTIF', 'label' => 'Inactif'],
+            ],
+            'categories_medicaments' => CategorieMedicament::query()->orderBy('libelle')->get(['id', 'libelle'])
+                ->map(fn (CategorieMedicament $row) => ['value' => (string) $row->id, 'label' => $row->libelle])
+                ->all(),
+            'formes_galeniques' => FormeGalenique::query()->orderBy('libelle')->get(['id', 'libelle'])
+                ->map(fn (FormeGalenique $row) => ['value' => (string) $row->id, 'label' => $row->libelle])
+                ->all(),
+            'unites_gestion' => UniteGestion::query()->orderBy('libelle')->get(['id', 'libelle'])
+                ->map(fn (UniteGestion $row) => ['value' => (string) $row->id, 'label' => $row->libelle])
+                ->all(),
             'oui_non' => [
                 ['value' => '1', 'label' => 'Oui'],
                 ['value' => '0', 'label' => 'Non'],

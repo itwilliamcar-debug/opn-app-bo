@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\AuditLog;
+use App\Services\AuthModeService;
 use App\Services\OpnAuthorizationService;
 use Database\Seeders\ProvincesActeursSeeder;
 use Illuminate\Http\Request;
@@ -16,9 +17,12 @@ class AuthController extends Controller
 {
     protected OpnAuthorizationService $authService;
 
-    public function __construct(OpnAuthorizationService $authService)
+    protected AuthModeService $authModeService;
+
+    public function __construct(OpnAuthorizationService $authService, AuthModeService $authModeService)
     {
         $this->authService = $authService;
+        $this->authModeService = $authModeService;
     }
 
     protected function formatUserPayload(User $user): array
@@ -62,6 +66,7 @@ class AuthController extends Controller
             'permissions' => $roleConfig['permissions'],
             'enforced_it_destination' => $enforcedIt,
             'etat' => $user->etat ?: 'actif',
+            'auth_mode' => $this->authModeService->modeEffectif($user),
             'poste_comptable' => $user->poste_comptable,
             'profil' => $user->profil ? [
                 'id' => $user->profil->id,
@@ -163,25 +168,44 @@ class AuthController extends Controller
 
         RateLimiter::clear($rateKey);
 
-        if ($user->is_2fa_enabled) {
-            $otpCode = (string) random_int(100000, 999999);
-            // 6 chiffres : la colonne two_factor_code est limitée à 10 caractères.
-            $user->forceFill([
-                'two_factor_code' => $otpCode,
-                'two_factor_expires_at' => now()->addMinutes(10),
-            ])->save();
+        $mode = $this->authModeService->modeEffectif($user);
 
+        if ($mode === AuthModeService::MODE_OTP_EMAIL) {
+            $otpCode = $this->authModeService->genererEtEnvoyerOtpEmail($user);
             $payload = [
                 'success' => true,
                 'requires_2fa' => true,
+                'auth_challenge' => AuthModeService::MODE_OTP_EMAIL,
                 'email' => $user->email,
-                'message' => 'Code de securite 2FA transmis par SMS / email.',
+                'message' => 'Un code OTP a ete envoye a votre adresse e-mail.',
             ];
             if (app()->environment('local') || config('mail.default') === 'log') {
                 $payload['dev_otp_hint'] = $otpCode;
             }
 
             return response()->json($payload);
+        }
+
+        if ($mode === AuthModeService::MODE_TOTP) {
+            if (!$user->totp_confirmed_at) {
+                return response()->json([
+                    'success' => true,
+                    'requires_totp_setup' => true,
+                    'auth_challenge' => AuthModeService::MODE_TOTP,
+                    'email' => $user->email,
+                    'qr_svg' => $this->authModeService->qrSvg($user),
+                    'totp_secret' => $user->fresh()->totp_secret,
+                    'message' => 'Scannez le QR code avec Google Authenticator, puis saisissez le code genere.',
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'requires_2fa' => true,
+                'auth_challenge' => AuthModeService::MODE_TOTP,
+                'email' => $user->email,
+                'message' => 'Saisissez le code Google Authenticator.',
+            ]);
         }
 
         $token = $user->createToken('opn_auth_token')->plainTextToken;
@@ -212,6 +236,7 @@ class AuthController extends Controller
         $validated = $request->validate([
             'email' => 'required|email',
             'code' => 'required|string|size:6',
+            'auth_challenge' => 'nullable|in:otp_email,totp',
         ]);
 
         $rateKey = '2fa:' . strtolower($validated['email']) . '|' . $request->ip();
@@ -226,17 +251,21 @@ class AuthController extends Controller
         }
 
         $user = User::where('email', $validated['email'])->first();
+        if (!$user || $this->compteInactif($user)) {
+            RateLimiter::hit($rateKey, 60);
 
+            return response()->json([
+                'success' => false,
+                'message' => 'Code 2FA incorrect ou expire.',
+            ], 422);
+        }
+
+        $mode = $validated['auth_challenge'] ?? $this->authModeService->modeEffectif($user);
         $otpValid = false;
-        if ($user && $user->two_factor_code && $user->two_factor_expires_at && now()->lte($user->two_factor_expires_at)) {
-            $stored = (string) $user->two_factor_code;
-            if (str_starts_with($stored, 'plain:')) {
-                $otpValid = hash_equals(substr($stored, 6), $validated['code']);
-            } elseif (preg_match('/^\d{6}$/', $stored)) {
-                $otpValid = hash_equals($stored, $validated['code']);
-            } else {
-                $otpValid = Hash::check($validated['code'], $stored);
-            }
+        if ($mode === AuthModeService::MODE_TOTP) {
+            $otpValid = $this->authModeService->totpValide($user, $validated['code']);
+        } else {
+            $otpValid = $this->authModeService->otpEmailValide($user, $validated['code']);
         }
 
         if (!$otpValid) {
@@ -261,7 +290,7 @@ class AuthController extends Controller
             'auteur_nom' => $user->name,
             'role' => $user->role ?? 'Agent OPN',
             'action' => 'VALIDATION_2FA',
-            'details' => "Authentification forte 2FA validee avec succes pour {$user->code_role}.",
+            'details' => "Authentification {$mode} validee pour {$user->code_role}.",
             'ip_address' => $request->ip(),
         ]);
 
@@ -270,6 +299,73 @@ class AuthController extends Controller
             'token' => $token,
             ...$this->identiteSession($user),
             'message' => 'Session 2FA certifiee conforme.',
+        ]);
+    }
+
+    /**
+     * Première confirmation Google Authenticator (scan QR + code).
+     */
+    public function confirmTotp(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'email' => 'required|email',
+            'password' => 'required|string',
+            'code' => 'required|string|size:6',
+        ]);
+
+        $rateKey = 'totp-setup:' . strtolower($validated['email']) . '|' . $request->ip();
+        $maxAttempts = app()->environment('local') ? 30 : 5;
+        if (RateLimiter::tooManyAttempts($rateKey, $maxAttempts)) {
+            $seconds = RateLimiter::availableIn($rateKey);
+
+            return response()->json([
+                'success' => false,
+                'message' => "Trop de tentatives. Reessayez dans {$seconds} secondes.",
+            ], 429);
+        }
+
+        $user = User::where('email', $validated['email'])->first();
+        if (!$user || !Hash::check($validated['password'], $user->password) || $this->compteInactif($user)) {
+            RateLimiter::hit($rateKey, 60);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Identifiants ou code invalides.',
+            ], 422);
+        }
+
+        if ($this->authModeService->modeEffectif($user) !== AuthModeService::MODE_TOTP) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Google Authenticator n\'est pas active pour ce compte.',
+            ], 422);
+        }
+
+        if (!$this->authModeService->confirmerTotp($user, $validated['code'])) {
+            RateLimiter::hit($rateKey, 60);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Code Google Authenticator incorrect.',
+            ], 422);
+        }
+
+        RateLimiter::clear($rateKey);
+        $token = $user->createToken('opn_auth_token_totp')->plainTextToken;
+
+        AuditLog::create([
+            'auteur_nom' => $user->name,
+            'role' => $user->role ?? 'Agent OPN',
+            'action' => 'ACTIVATION_TOTP',
+            'details' => "Google Authenticator active et premiere connexion validee ({$user->code_role}).",
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'token' => $token,
+            ...$this->identiteSession($user->fresh()),
+            'message' => 'Google Authenticator active. Session ouverte.',
         ]);
     }
 

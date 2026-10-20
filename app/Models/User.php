@@ -33,12 +33,19 @@ class User extends Authenticatable
         'departement',
         'telephone',
         'last_seen_at',
+        'auth_mode',
+        'is_2fa_enabled',
+        'totp_secret',
+        'totp_confirmed_at',
+        'two_factor_code',
+        'two_factor_expires_at',
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
         'two_factor_code',
+        'totp_secret',
     ];
 
     protected function casts(): array
@@ -48,6 +55,7 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_2fa_enabled' => 'boolean',
             'two_factor_expires_at' => 'datetime',
+            'totp_confirmed_at' => 'datetime',
             'last_seen_at' => 'datetime',
         ];
     }
