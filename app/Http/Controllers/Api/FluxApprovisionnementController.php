@@ -545,7 +545,9 @@ class FluxApprovisionnementController extends Controller
             $this->journaliser($commande->fresh(), $user, 'DISPERSION', $detail);
         });
 
-        return response()->json(['success' => true, 'commande' => $commande->fresh(['antenne', 'lignes', 'journal'])]);
+        $fraiche = $this->enrichirCommande($commande->fresh(['antenne', 'lignes', 'journal', 'pieces.lignes']));
+
+        return response()->json(['success' => true, 'commande' => $fraiche]);
     }
 
     public function rejeter(Request $request, int $id): JsonResponse
@@ -587,14 +589,14 @@ class FluxApprovisionnementController extends Controller
 
             return $commande->statut === 'EFFECTUEE_CHEF_ANTENNE' ? 'EFFECTUEE_CHEF_ANTENNE' : 'SOUMISE_ANTENNE';
         }
-        if ($reliquat > 0) {
-            return 'PARTIELLEMENT_ARCHIVEE';
-        }
-        if ($resteDispersion <= 0 && $dispersee > 0) {
+        if ($dispersee > 0 && $resteDispersion <= 0 && $reliquat <= 0) {
             return 'DISPERSEE';
         }
-        if ($dispersee > 0 && $resteDispersion > 0) {
+        if ($dispersee > 0) {
             return 'PARTIELLEMENT_DISPERSEE';
+        }
+        if ($reliquat > 0) {
+            return 'PARTIELLEMENT_ARCHIVEE';
         }
 
         return 'TRANSMISE_SIEGE';
