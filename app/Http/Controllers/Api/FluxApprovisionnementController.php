@@ -203,6 +203,65 @@ class FluxApprovisionnementController extends Controller
     }
 
     /**
+     * Le demandeur corrige sa propre demande tant qu'elle n'a pas quitté l'antenne.
+     */
+    public function modifier(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $commande = CommandeTerritoriale::with('lignes')->findOrFail($id);
+        if (!$this->demandeurPeutEditer($user, $commande)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cette demande ne peut plus être modifiée : elle a déjà été traitée.',
+            ], 403);
+        }
+
+        $data = $request->validate([
+            'motif' => 'nullable|string|max:1000',
+            'lignes' => 'required|array|min:1',
+            'lignes.*.produit_id' => 'nullable|exists:produits_pharmaceutiques,id',
+            'lignes.*.designation' => 'required|string|max:200',
+            'lignes.*.quantite_demandee' => 'required|integer|min:1',
+        ]);
+
+        $commande = DB::transaction(function () use ($data, $user, $commande) {
+            $montant = 0;
+            $lignes = [];
+            foreach ($data['lignes'] as $ligne) {
+                $prix = 0;
+                if (!empty($ligne['produit_id'])) {
+                    $prix = (float) (ProduitPharmaceutique::find($ligne['produit_id'])->prix_unitaire_xaf ?? 0);
+                }
+                $qte = (int) $ligne['quantite_demandee'];
+                $montant += $prix * $qte;
+                $lignes[] = [
+                    'produit_id' => $ligne['produit_id'] ?? null,
+                    'designation' => $ligne['designation'],
+                    'quantite_demandee' => $qte,
+                    'quantite_prise_en_charge' => 0,
+                    'quantite_reliquat' => $qte,
+                    'quantite_dispersee' => 0,
+                    'prix_unitaire_xaf' => $prix,
+                ];
+            }
+
+            $commande->lignes()->delete();
+            foreach ($lignes as $ligne) {
+                $commande->lignes()->create($ligne);
+            }
+            $commande->update([
+                'motif' => $data['motif'] ?? null,
+                'montant_total_xaf' => $montant,
+            ]);
+            $this->journaliser($commande, $user, 'MODIFICATION', 'Demande corrigée par '.$user->name);
+
+            return $commande->fresh(['antenne', 'lignes', 'journal']);
+        });
+
+        return response()->json(['success' => true, 'commande' => $commande]);
+    }
+
+    /**
      * Transfert antenne → siège (sans prise en charge de quantités).
      * Le chef d'antenne envoie la demande telle quelle au siège.
      */
@@ -835,11 +894,12 @@ class FluxApprovisionnementController extends Controller
     public function supprimer(Request $request, int $id): JsonResponse
     {
         $user = $request->user()->loadMissing('profil:id,code');
-        if (!$this->peutSupprimer($user)) {
+        $commande = CommandeTerritoriale::findOrFail($id);
+        $retraitDemandeur = $this->demandeurPeutEditer($user, $commande);
+        if (!$this->peutSupprimer($user) && !$retraitDemandeur) {
             return response()->json(['success' => false, 'message' => 'Ce profil n\'a pas le droit de supprimer une commande.'], 403);
         }
 
-        $commande = CommandeTerritoriale::findOrFail($id);
         if (!$this->commandeVisible($user, $commande)) {
             return response()->json(['success' => false, 'message' => 'Cette commande n\'est pas accessible à ce profil.'], 403);
         }
@@ -860,6 +920,14 @@ class FluxApprovisionnementController extends Controller
             'statut' => $commande->statut,
             'detail' => $detail,
         ]);
+    }
+
+    /** Le demandeur corrige ou retire sa demande tant qu'elle est encore à l'antenne. */
+    private function demandeurPeutEditer($user, CommandeTerritoriale $commande): bool
+    {
+        return in_array($user->code_role, ['DEMANDEUR_PHARMACIEN', 'DEMANDEUR_STRUCTURE'], true)
+            && (int) $commande->demandeur_user_id === (int) $user->id
+            && $commande->statut === 'SOUMISE_ANTENNE';
     }
 
     /** La case Supprimer de l'habilitation flux autorise la suppression des commandes. */

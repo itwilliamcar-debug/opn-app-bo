@@ -156,6 +156,7 @@ Route::prefix('v1')->group(function () {
 
         Route::get('/flux/commandes', [FluxApprovisionnementController::class, 'index']);
         Route::post('/flux/commandes', [FluxApprovisionnementController::class, 'store']);
+        Route::put('/flux/commandes/{id}', [FluxApprovisionnementController::class, 'modifier']);
         Route::post('/flux/commandes/{id}/transferer', [FluxApprovisionnementController::class, 'transferer']);
         Route::post('/flux/commandes/{id}/transmettre', [FluxApprovisionnementController::class, 'transmettre']);
         Route::post('/flux/commandes/{id}/disperser', [FluxApprovisionnementController::class, 'disperser']);

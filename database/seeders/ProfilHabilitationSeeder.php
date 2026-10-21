@@ -258,8 +258,9 @@ class ProfilHabilitationSeeder extends Seeder
             'convoyeur' => array_merge($commun, [
                 'ACCESS_DISTRIBUTION', 'ACCESS_LOGISTIQUE', 'ACCESS_DEMANDES', 'ACCESS_URGENCES', 'ACCESS_CONNECT',
             ]),
-            'demandeur' => array_merge($commun, ['ACCESS_DEMANDES', 'ACCESS_FACTURATION', 'ACCESS_STOCKS', 'ACCESS_CONNECT']),
-            'demandeur_structure' => array_merge($commun, ['ACCESS_DEMANDES', 'ACCESS_FACTURATION', 'ACCESS_STOCKS', 'ACCESS_CONNECT']),
+            // Demandeurs : pas de référentiel.
+            'demandeur' => ['ACCESS_FLUX', 'ACCESS_SERVICES', 'ACCESS_DEMANDES', 'ACCESS_FACTURATION', 'ACCESS_STOCKS', 'ACCESS_CONNECT'],
+            'demandeur_structure' => ['ACCESS_FLUX', 'ACCESS_SERVICES', 'ACCESS_DEMANDES', 'ACCESS_FACTURATION', 'ACCESS_STOCKS', 'ACCESS_CONNECT'],
             'vendeur' => array_merge($commun, [
                 'ACCESS_PROSPECTION', 'ACCESS_FACTURATION', 'ACCESS_MARGE', 'ACCESS_RECOUVREMENT',
                 'ACCESS_INVENTAIRES', 'ACCESS_STOCKS', 'ACCESS_DEMANDES', 'ACCESS_CONNECT',
@@ -329,6 +330,34 @@ class ProfilHabilitationSeeder extends Seeder
         }
 
         $this->rattacherSansProfil($ids);
+        $this->retirerReferentielDemandeurs($ids);
+    }
+
+    /** Les profils demandeurs n'ont jamais le référentiel, même s'il a été coché avant. */
+    private function retirerReferentielDemandeurs(array $ids): void
+    {
+        $habilitationIds = Habilitation::whereIn('code', ['ACCESS_REFERENTIEL', 'referentiel'])->pluck('id');
+        if ($habilitationIds->isEmpty()) {
+            return;
+        }
+        $exclusifs = User::query()
+            ->whereNotNull('profil_id')
+            ->select('profil_id')
+            ->groupBy('profil_id')
+            ->havingRaw("bool_and(code_role in ('DEMANDEUR_PHARMACIEN', 'DEMANDEUR_STRUCTURE'))")
+            ->pluck('profil_id');
+        $profilIds = collect(['demandeur', 'demandeur_structure'])
+            ->map(fn ($code) => $ids[$code] ?? null)
+            ->filter()
+            ->merge($exclusifs)
+            ->unique()
+            ->values();
+        if ($profilIds->isEmpty()) {
+            return;
+        }
+        HabilitationProfil::whereIn('profil_id', $profilIds)
+            ->whereIn('habilitation_id', $habilitationIds)
+            ->delete();
     }
 
     private function rattacherSansProfil(array $ids): void
