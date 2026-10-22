@@ -36,6 +36,22 @@ class FluxPiecePdfService
         $dompdf = new Dompdf($options);
         $dompdf->loadHtml($html, 'UTF-8');
         $dompdf->setPaper('A4', 'portrait');
+        $dompdf->setCallbacks([
+            [
+                'event' => 'end_document',
+                'f' => function (int $pageNumber, int $pageCount, $canvas, $fontMetrics) {
+                    $font = $fontMetrics->getFont('DejaVu Sans', 'bold');
+                    $canvas->set_opacity(0.22);
+                    $largeur = $canvas->get_width();
+                    $hauteur = $canvas->get_height();
+                    for ($y = 36; $y < $hauteur + 20; $y += 148) {
+                        for ($x = -24; $x < $largeur; $x += 188) {
+                            $canvas->text($x, $y, 'OPN', $font, 32, [0.055, 0.165, 0.310], 0, 1.2, -32);
+                        }
+                    }
+                },
+            ],
+        ]);
         $dompdf->render();
 
         return response($dompdf->output(), 200, [

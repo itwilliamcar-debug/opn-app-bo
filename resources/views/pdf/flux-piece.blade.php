@@ -14,23 +14,6 @@
             padding: 0;
             position: relative;
         }
-        .watermark {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: -1000;
-        }
-        .watermark-cell {
-            text-align: center;
-            vertical-align: middle;
-            font-size: 110px;
-            font-weight: 700;
-            letter-spacing: 22px;
-            color: #cbd5e1;
-            opacity: 0.22;
-        }
         .content { position: relative; z-index: 1; }
         .header {
             width: 100%;
@@ -113,14 +96,6 @@
     </style>
 </head>
 <body>
-    <div class="watermark">
-        <table style="width:100%; height:100%;">
-            <tr>
-                <td class="watermark-cell">OPN</td>
-            </tr>
-        </table>
-    </div>
-
     <div class="content">
         <table class="header">
             <tr>
